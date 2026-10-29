@@ -15,6 +15,8 @@ if str(ROOT) not in sys.path:
 
 from tripmind.config import get_config, resolve_project_path
 
+HTTP_USER_AGENT = "TripMind/0.3 (+https://github.com/Shengxiang-Lin/TripMind)"
+
 
 def _download_hf(repo_id: str, revision: str, target: Path) -> None:
     target.mkdir(parents=True, exist_ok=True)
@@ -35,7 +37,9 @@ def _download_file(url: str, target: Path, force: bool = False) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     temp = target.with_suffix(target.suffix + ".part")
     print(f"[HTTP] {url}")
-    with requests.get(url, stream=True, timeout=60) as response:
+    with requests.get(
+        url, stream=True, timeout=60, headers={"User-Agent": HTTP_USER_AGENT}
+    ) as response:
         response.raise_for_status()
         with temp.open("wb") as f:
             shutil.copyfileobj(response.raw, f)

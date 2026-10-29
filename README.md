@@ -60,13 +60,9 @@ TripMind/
 git clone https://github.com/Shengxiang-Lin/TripMind.git
 cd TripMind
 
-python -m venv .venv
+conda create -n tripmind python=3.11 -y
 
-# Linux / macOS
-source .venv/bin/activate
-
-# Windows PowerShell
-# .\.venv\Scripts\Activate.ps1
+conda activate tripmind 
 
 pip install -r requirements.txt
 ```
