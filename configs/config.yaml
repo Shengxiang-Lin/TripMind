@@ -1,0 +1,49 @@
+project:
+  name: TripMind
+  mode: local
+
+providers:
+  # auto | local | ors
+  route: auto
+  # auto | local | dashscope
+  realtime: auto
+
+dashscope:
+  # Leave empty in the tracked file. Put real secrets in
+  # configs/config.local.yaml or environment variables.
+  api_key: ""
+  base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+  model: "qwen-plus"
+  realtime_model: "qwen-plus"
+  search_strategy: "turbo"
+
+ors:
+  api_key: ""
+  # New HeiGIT endpoint. api.openrouteservice.org is deprecated.
+  base_url: "https://api.heigit.org/openrouteservice"
+  timeout_seconds: 15
+
+realtime:
+  ttl_seconds: 3600
+  poi_limit: 6
+
+data:
+  poi_dir: "data/poi"
+  knowledge_file: "data/knowledge/travel_knowledge.json"
+  raw_dir: "data/raw"
+  processed_dir: "data/processed"
+
+  chinatravel:
+    repo_id: "LAMDA-NeSy/ChinaTravel"
+    revision: "main"
+
+  chinatravel_sandbox:
+    repo_id: "LAMDA-NeSy/ChinaTravel-Sandbox"
+    revision: "main"
+
+  wikivoyage:
+    languages:
+      - zh
+      - en
+    dump_filename: "{lang}wikivoyage-latest-pages-articles.xml.bz2"
+    dump_url: "https://dumps.wikimedia.org/{lang}wikivoyage/latest/{filename}"

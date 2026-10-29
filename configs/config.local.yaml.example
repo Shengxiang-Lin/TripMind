@@ -1,0 +1,8 @@
+# Copy this file to configs/config.local.yaml and fill in your own keys.
+# configs/config.local.yaml is ignored by git.
+
+dashscope:
+  api_key: "YOUR_DASHSCOPE_API_KEY"
+
+ors:
+  api_key: "YOUR_ORS_API_KEY"

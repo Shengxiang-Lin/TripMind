@@ -1,31 +1,42 @@
 from __future__ import annotations
 
-import os
 from typing import Any, Iterable, Mapping
+
+from ..config import get_config
 
 
 class DashScopeLLM:
-    """Thin OpenAI-compatible client for Alibaba Cloud Model Studio.
+    """Thin OpenAI-compatible client for Alibaba Cloud Model Studio."""
 
-    The client supports both ordinary Qwen inference and Alibaba Cloud web
-    search. Core TripMind remains runnable without this optional integration.
-    """
-
-    def __init__(self, model: str | None = None):
+    def __init__(
+        self,
+        model: str | None = None,
+        *,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        config: Mapping[str, Any] | None = None,
+    ):
         try:
             from openai import OpenAI
         except ImportError as exc:
             raise RuntimeError("Install `openai` to use DashScopeLLM.") from exc
 
-        api_key = os.getenv("DASHSCOPE_API_KEY")
-        if not api_key:
-            raise RuntimeError("DASHSCOPE_API_KEY is not set.")
+        config = dict(config or get_config())
+        dashscope = config.get("dashscope", {})
 
-        base_url = os.getenv(
-            "DASHSCOPE_BASE_URL",
-            "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        api_key = api_key or str(dashscope.get("api_key", "")).strip()
+        if not api_key:
+            raise RuntimeError(
+                "No DashScope API key configured. Set dashscope.api_key in "
+                "configs/config.local.yaml or DASHSCOPE_API_KEY."
+            )
+
+        base_url = (
+            base_url
+            or dashscope.get("base_url")
+            or "https://dashscope.aliyuncs.com/compatible-mode/v1"
         )
-        self.model = model or os.getenv("DASHSCOPE_MODEL", "qwen-plus")
+        self.model = model or dashscope.get("model", "qwen-plus")
         self.client = OpenAI(api_key=api_key, base_url=base_url)
 
     def chat(

@@ -3,3 +3,5 @@ pydantic>=2.7
 python-dotenv>=1.0
 openai>=1.50
 requests>=2.32
+PyYAML>=6.0
+huggingface_hub>=0.25

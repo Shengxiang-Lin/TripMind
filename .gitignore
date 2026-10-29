@@ -1,6 +1,20 @@
-.env
-.venv/
+# Python
 __pycache__/
 *.py[cod]
+.venv/
+venv/
 .pytest_cache/
+
+# Secrets / local configuration
+.env
+configs/config.local.yaml
+
+# Downloaded and generated data
+data/raw/
+data/processed/
 data/sft_seed.jsonl
+
+# OS / IDE
+.DS_Store
+.vscode/
+.idea/

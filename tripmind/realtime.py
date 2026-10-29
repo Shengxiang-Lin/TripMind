@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import json
-import os
 import time
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
-from typing import Sequence
+from typing import Any, Mapping, Sequence
 
+from .config import get_config
 from .models import POI, RealtimeSignal, UserProfile
 
 
@@ -51,18 +51,7 @@ class CachingRealtimeProvider(RealtimeProvider):
 
 
 class DashScopeRealtimeProvider(RealtimeProvider):
-    """Realtime travel context via Alibaba Cloud Model Studio web search.
-
-    The provider intentionally separates time-sensitive context from static RAG.
-    It asks Qwen web search for two batches:
-      1) city-level weather/events/alerts;
-      2) top-POI closures/opening changes/promotions.
-
-    OpenAI-compatible web search does not expose first-class source objects, so
-    returned signals are treated as web-search context rather than authoritative
-    structured facts. Hard constraints are only accepted when the model marks an
-    explicit high-confidence closure/unavailability.
-    """
+    """Realtime travel context via Alibaba Cloud Model Studio web search."""
 
     ALLOWED_KINDS = {
         "weather",
@@ -75,17 +64,29 @@ class DashScopeRealtimeProvider(RealtimeProvider):
     ALLOWED_EFFECTS = {"avoid", "prefer", "prefer_indoor", "info"}
     ALLOWED_CONFIDENCE = {"high", "medium", "low"}
 
-    def __init__(self, llm=None, poi_limit: int | None = None):
+    def __init__(
+        self,
+        llm=None,
+        poi_limit: int | None = None,
+        config: Mapping[str, Any] | None = None,
+    ):
+        self.config = dict(config or get_config())
+        dashscope = self.config.get("dashscope", {})
+        realtime = self.config.get("realtime", {})
+
         if llm is None:
             from .integrations.dashscope_llm import DashScopeLLM
 
             llm = DashScopeLLM(
-                model=os.getenv("DASHSCOPE_REALTIME_MODEL")
-                or os.getenv("DASHSCOPE_MODEL", "qwen-plus")
+                model=dashscope.get("realtime_model")
+                or dashscope.get("model", "qwen-plus"),
+                config=self.config,
             )
         self.llm = llm
-        self.poi_limit = poi_limit or int(os.getenv("TRIPMIND_REALTIME_POI_LIMIT", "6"))
-        self.strategy = os.getenv("DASHSCOPE_SEARCH_STRATEGY", "turbo")
+        self.poi_limit = int(
+            poi_limit if poi_limit is not None else realtime.get("poi_limit", 6)
+        )
+        self.strategy = str(dashscope.get("search_strategy", "turbo"))
 
     @staticmethod
     def _extract_json(text: str) -> dict:

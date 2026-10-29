@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import os
-from typing import List
+from typing import Any, List, Mapping
 
-from dotenv import load_dotenv
-
+from .config import get_config, resolve_project_path
 from .data import city_pois, load_pois
 from .map_provider import FallbackMapProvider, LocalMapProvider, MapProvider
 from .models import Itinerary, RealtimeSignal, UserProfile
@@ -18,29 +16,47 @@ from .realtime import (
 )
 from .recommender import HeuristicPersonalizedRanker, RealtimeAdjustmentEngine
 
-load_dotenv()
 
+def build_map_provider(config: Mapping[str, Any] | None = None) -> MapProvider:
+    config = dict(config or get_config())
+    mode = str(config.get("providers", {}).get("route", "auto")).strip().lower()
+    ors = config.get("ors", {})
+    api_key = str(ors.get("api_key", "")).strip()
 
-def build_map_provider() -> MapProvider:
-    mode = os.getenv("TRIPMIND_ROUTE_PROVIDER", "auto").strip().lower()
-    if mode in {"auto", "ors"} and os.getenv("ORS_API_KEY"):
+    if mode in {"auto", "ors"} and api_key:
         from .integrations.openrouteservice import OpenRouteServiceProvider
 
-        return FallbackMapProvider(OpenRouteServiceProvider(), LocalMapProvider())
+        provider = OpenRouteServiceProvider(
+            api_key=api_key,
+            base_url=ors.get("base_url"),
+            timeout=float(ors.get("timeout_seconds", 15)),
+            config=config,
+        )
+        return FallbackMapProvider(provider, LocalMapProvider())
     if mode == "ors":
-        raise RuntimeError("TRIPMIND_ROUTE_PROVIDER=ors but ORS_API_KEY is not set.")
+        raise RuntimeError(
+            "providers.route=ors but no ORS key is configured. "
+            "Set ors.api_key in configs/config.local.yaml or ORS_API_KEY."
+        )
     return LocalMapProvider()
 
 
-def build_realtime_provider() -> RealtimeProvider:
-    mode = os.getenv("TRIPMIND_REALTIME_PROVIDER", "auto").strip().lower()
-    if mode in {"auto", "dashscope"} and os.getenv("DASHSCOPE_API_KEY"):
-        provider = DashScopeRealtimeProvider()
-        ttl = int(os.getenv("TRIPMIND_REALTIME_TTL_SECONDS", "3600"))
+def build_realtime_provider(
+    config: Mapping[str, Any] | None = None,
+) -> RealtimeProvider:
+    config = dict(config or get_config())
+    mode = str(config.get("providers", {}).get("realtime", "auto")).strip().lower()
+    dashscope = config.get("dashscope", {})
+    api_key = str(dashscope.get("api_key", "")).strip()
+
+    if mode in {"auto", "dashscope"} and api_key:
+        provider = DashScopeRealtimeProvider(config=config)
+        ttl = int(config.get("realtime", {}).get("ttl_seconds", 3600))
         return CachingRealtimeProvider(provider, ttl_seconds=ttl)
     if mode == "dashscope":
         raise RuntimeError(
-            "TRIPMIND_REALTIME_PROVIDER=dashscope but DASHSCOPE_API_KEY is not set."
+            "providers.realtime=dashscope but no DashScope key is configured. "
+            "Set dashscope.api_key in configs/config.local.yaml or DASHSCOPE_API_KEY."
         )
     return NullRealtimeProvider()
 
@@ -50,13 +66,22 @@ class TripMindService:
         self,
         map_provider: MapProvider | None = None,
         realtime_provider: RealtimeProvider | None = None,
+        config: Mapping[str, Any] | None = None,
     ):
-        self.pois = load_pois()
-        self.rag = LocalKnowledgeRetriever()
+        self.config = dict(config or get_config())
+        data_cfg = self.config.get("data", {})
+
+        poi_dir = resolve_project_path(data_cfg.get("poi_dir", "data/poi"))
+        knowledge_file = resolve_project_path(
+            data_cfg.get("knowledge_file", "data/knowledge/travel_knowledge.json")
+        )
+
+        self.pois = load_pois(poi_dir)
+        self.rag = LocalKnowledgeRetriever(knowledge_file)
         self.ranker = HeuristicPersonalizedRanker()
         self.realtime_adjuster = RealtimeAdjustmentEngine()
-        self.map = map_provider or build_map_provider()
-        self.realtime = realtime_provider or build_realtime_provider()
+        self.map = map_provider or build_map_provider(self.config)
+        self.realtime = realtime_provider or build_realtime_provider(self.config)
         self.planner = GreedyConstraintPlanner(self.map)
 
     def plan(self, profile: UserProfile) -> Itinerary:
@@ -166,7 +191,7 @@ def itinerary_to_markdown(itinerary: Itinerary) -> str:
     lines.append("\n---")
     if used_estimated_route:
         lines.append(
-            "> Some route legs are local estimates. Configure `ORS_API_KEY` and use "
+            "> Some route legs are local estimates. Configure an ORS key and use "
             "walking/driving/cycling for road-network-grounded routes."
         )
     elif used_grounded_route:
@@ -176,7 +201,7 @@ def itinerary_to_markdown(itinerary: Itinerary) -> str:
 
     if not itinerary.realtime_signals:
         lines.append(
-            "> Realtime enrichment is currently disabled/unavailable. Set "
-            "`DASHSCOPE_API_KEY` to enable Alibaba Cloud web-search context."
+            "> Realtime enrichment is currently disabled/unavailable. Configure a "
+            "DashScope key to enable Alibaba Cloud web-search context."
         )
     return "\n".join(lines)

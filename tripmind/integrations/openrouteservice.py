@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-import os
-from typing import Sequence
+from typing import Any, Mapping, Sequence
 
 import requests
 
+from ..config import get_config
 from ..map_provider import MapProvider
 from ..models import POI, RouteLeg, RouteMatrix
 
 
 class OpenRouteServiceProvider(MapProvider):
-    """Road-network routing backed by openrouteservice.
+    """Road-network routing backed by openrouteservice / HeiGIT.
 
     ORS does not provide public-transit routing. TripMind therefore exposes
     walking/driving/cycling here and lets FallbackMapProvider handle unsupported
@@ -27,17 +27,27 @@ class OpenRouteServiceProvider(MapProvider):
         self,
         api_key: str | None = None,
         base_url: str | None = None,
-        timeout: float = 15.0,
+        timeout: float | None = None,
+        config: Mapping[str, Any] | None = None,
     ):
-        self.api_key = api_key or os.getenv("ORS_API_KEY")
+        config = dict(config or get_config())
+        ors = config.get("ors", {})
+
+        self.api_key = api_key or str(ors.get("api_key", "")).strip()
         if not self.api_key:
-            raise RuntimeError("ORS_API_KEY is not set.")
+            raise RuntimeError(
+                "No ORS API key configured. Set ors.api_key in "
+                "configs/config.local.yaml or ORS_API_KEY."
+            )
+
         self.base_url = (
             base_url
-            or os.getenv("ORS_BASE_URL")
-            or "https://api.openrouteservice.org"
+            or ors.get("base_url")
+            or "https://api.heigit.org/openrouteservice"
         ).rstrip("/")
-        self.timeout = timeout
+        self.timeout = float(
+            timeout if timeout is not None else ors.get("timeout_seconds", 15)
+        )
 
     def supports(self, mode: str) -> bool:
         return mode in self.PROFILE_BY_MODE
@@ -109,7 +119,10 @@ class OpenRouteServiceProvider(MapProvider):
             for row in payload.get("distances", [])
         ]
         durations = [
-            [None if value is None else max(0, round(float(value) / 60.0)) for value in row]
+            [
+                None if value is None else max(0, round(float(value) / 60.0))
+                for value in row
+            ]
             for row in payload.get("durations", [])
         ]
         return RouteMatrix(
