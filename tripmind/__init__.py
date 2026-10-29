@@ -1,3 +1,3 @@
-"""TripMind: personalized, knowledge-grounded, constraint-aware travel planning."""
+"""TripMind: personalized, knowledge-grounded, realtime-aware travel planning."""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

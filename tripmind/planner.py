@@ -12,8 +12,17 @@ def _to_min(hhmm: str) -> int:
     return dt.hour * 60 + dt.minute
 
 
+def _blocked(name: str, blocked_names: set[str]) -> bool:
+    value = "".join(name.casefold().split())
+    for blocked in blocked_names:
+        other = "".join(blocked.casefold().split())
+        if other and (value == other or value in other or other in value):
+            return True
+    return False
+
+
 class GreedyConstraintPlanner:
-    """A compact baseline planner with explicit time/budget constraints.
+    """Compact baseline planner with explicit time/budget constraints.
 
     It favors high personalized score while selecting geographically nearby POIs.
     OR-Tools can replace this class without changing upstream/downstream APIs.
@@ -22,8 +31,18 @@ class GreedyConstraintPlanner:
     def __init__(self, map_provider: MapProvider):
         self.map = map_provider
 
-    def plan(self, profile: UserProfile, ranked: List[RankedPOI]) -> List[DayPlan]:
-        remaining = ranked[: max(8, profile.days * 5)]
+    def plan(
+        self,
+        profile: UserProfile,
+        ranked: List[RankedPOI],
+        blocked_pois: set[str] | None = None,
+    ) -> List[DayPlan]:
+        blocked_pois = blocked_pois or set()
+        remaining = [
+            item
+            for item in ranked[: max(8, profile.days * 5)]
+            if not _blocked(item.poi.name, blocked_pois)
+        ]
         daily_budget = profile.budget / max(1, profile.days)
         days: List[DayPlan] = []
 
@@ -40,7 +59,11 @@ class GreedyConstraintPlanner:
                 feasible = []
                 for cand in remaining:
                     poi = cand.poi
-                    leg = self.map.route(previous.poi, poi, profile.transport_preference) if previous else None
+                    leg = (
+                        self.map.route(previous.poi, poi, profile.transport_preference)
+                        if previous
+                        else None
+                    )
                     travel = leg.duration_min if leg else 0
                     arrival = current_min + travel
                     opening = _to_min(poi.opening_time)
@@ -79,7 +102,9 @@ class GreedyConstraintPlanner:
                 previous = chosen
                 remaining.remove(chosen)
 
-                max_pois = {"relaxed": 3, "normal": 4, "intensive": 5}.get(profile.pace, 4)
+                max_pois = {"relaxed": 3, "normal": 4, "intensive": 5}.get(
+                    profile.pace, 4
+                )
                 if len(items) >= max_pois:
                     break
 

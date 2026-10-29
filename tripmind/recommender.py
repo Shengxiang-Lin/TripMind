@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Iterable, List
 
-from .models import POI, RankedPOI, UserProfile
+from .models import POI, RankedPOI, RealtimeSignal, UserProfile
 
 
 GROUP_HINTS = {
@@ -18,6 +18,17 @@ PACE_PENALTY = {
     "normal": {"high": 0.08, "medium": 0.02, "low": 0.0},
     "intensive": {"high": 0.0, "medium": 0.0, "low": 0.0},
 }
+
+INDOOR_CATEGORIES = {
+    "museum",
+    "gallery",
+    "shopping",
+    "mall",
+    "aquarium",
+    "theatre",
+    "theater",
+}
+OUTDOOR_HINTS = {"nature", "park", "scenic", "walk", "hiking", "outdoor"}
 
 
 class HeuristicPersonalizedRanker:
@@ -73,3 +84,70 @@ class HeuristicPersonalizedRanker:
             ranked.append(RankedPOI(poi=poi, score=round(score, 4), reasons=reasons))
 
         return sorted(ranked, key=lambda x: x.score, reverse=True)
+
+
+class RealtimeAdjustmentEngine:
+    """Deterministically turn realtime signals into small ranking adjustments."""
+
+    @staticmethod
+    def _normalize(text: str) -> str:
+        return "".join(text.casefold().split())
+
+    @classmethod
+    def _matches_poi(cls, subject: str, poi_name: str) -> bool:
+        a, b = cls._normalize(subject), cls._normalize(poi_name)
+        return bool(a and b and (a == b or a in b or b in a))
+
+    @staticmethod
+    def _is_indoor(poi: POI) -> bool:
+        if poi.indoor is not None:
+            return poi.indoor
+        return poi.category.casefold() in INDOOR_CATEGORIES
+
+    @staticmethod
+    def _is_outdoor(poi: POI) -> bool:
+        tags = {x.casefold() for x in poi.tags}
+        return bool(tags & OUTDOOR_HINTS)
+
+    def apply(
+        self,
+        profile: UserProfile,
+        ranked: List[RankedPOI],
+        signals: List[RealtimeSignal],
+    ) -> List[RankedPOI]:
+        adjusted: List[RankedPOI] = []
+        city_key = self._normalize(profile.city)
+
+        for item in ranked:
+            delta = 0.0
+            reasons = list(item.reasons)
+            for signal in signals:
+                subject_key = self._normalize(signal.subject)
+                poi_match = self._matches_poi(signal.subject, item.poi.name)
+                city_scope = subject_key in {city_key, self._normalize(profile.country)}
+
+                if poi_match:
+                    if signal.effect == "avoid":
+                        delta -= 1.0 if signal.hard_constraint else 0.30
+                        reasons.append(f"realtime_avoid:{signal.kind}")
+                    elif signal.effect == "prefer":
+                        delta += 0.08
+                        reasons.append(f"realtime_prefer:{signal.kind}")
+
+                if city_scope and signal.effect == "prefer_indoor":
+                    if self._is_indoor(item.poi):
+                        delta += 0.08
+                        reasons.append("weather_indoor_bonus")
+                    elif self._is_outdoor(item.poi):
+                        delta -= 0.05
+                        reasons.append("weather_outdoor_penalty")
+
+            adjusted.append(
+                RankedPOI(
+                    poi=item.poi,
+                    score=round(max(0.0, item.score + delta), 4),
+                    reasons=reasons,
+                )
+            )
+
+        return sorted(adjusted, key=lambda x: x.score, reverse=True)

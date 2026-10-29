@@ -1,0 +1,194 @@
+from __future__ import annotations
+
+import json
+import os
+import time
+from abc import ABC, abstractmethod
+from datetime import datetime, timezone
+from typing import Sequence
+
+from .models import POI, RealtimeSignal, UserProfile
+
+
+class RealtimeProvider(ABC):
+    @abstractmethod
+    def fetch(self, profile: UserProfile, pois: Sequence[POI]) -> list[RealtimeSignal]:
+        raise NotImplementedError
+
+
+class NullRealtimeProvider(RealtimeProvider):
+    """No-network provider used by local tests and offline demos."""
+
+    def fetch(self, profile: UserProfile, pois: Sequence[POI]) -> list[RealtimeSignal]:
+        return []
+
+
+class CachingRealtimeProvider(RealtimeProvider):
+    """Tiny in-memory TTL cache to avoid repeated web searches while editing a plan."""
+
+    def __init__(self, inner: RealtimeProvider, ttl_seconds: int = 3600):
+        self.inner = inner
+        self.ttl_seconds = ttl_seconds
+        self._cache: dict[tuple, tuple[float, list[RealtimeSignal]]] = {}
+
+    def _key(self, profile: UserProfile, pois: Sequence[POI]) -> tuple:
+        return (
+            profile.country.casefold(),
+            profile.city.casefold(),
+            profile.start_date or "",
+            tuple(sorted(p.poi_id for p in pois)),
+        )
+
+    def fetch(self, profile: UserProfile, pois: Sequence[POI]) -> list[RealtimeSignal]:
+        key = self._key(profile, pois)
+        now = time.monotonic()
+        hit = self._cache.get(key)
+        if hit and now - hit[0] < self.ttl_seconds:
+            return list(hit[1])
+        signals = self.inner.fetch(profile, pois)
+        self._cache[key] = (now, list(signals))
+        return signals
+
+
+class DashScopeRealtimeProvider(RealtimeProvider):
+    """Realtime travel context via Alibaba Cloud Model Studio web search.
+
+    The provider intentionally separates time-sensitive context from static RAG.
+    It asks Qwen web search for two batches:
+      1) city-level weather/events/alerts;
+      2) top-POI closures/opening changes/promotions.
+
+    OpenAI-compatible web search does not expose first-class source objects, so
+    returned signals are treated as web-search context rather than authoritative
+    structured facts. Hard constraints are only accepted when the model marks an
+    explicit high-confidence closure/unavailability.
+    """
+
+    ALLOWED_KINDS = {
+        "weather",
+        "closure",
+        "opening_hours",
+        "promotion",
+        "event",
+        "alert",
+    }
+    ALLOWED_EFFECTS = {"avoid", "prefer", "prefer_indoor", "info"}
+    ALLOWED_CONFIDENCE = {"high", "medium", "low"}
+
+    def __init__(self, llm=None, poi_limit: int | None = None):
+        if llm is None:
+            from .integrations.dashscope_llm import DashScopeLLM
+
+            llm = DashScopeLLM(
+                model=os.getenv("DASHSCOPE_REALTIME_MODEL")
+                or os.getenv("DASHSCOPE_MODEL", "qwen-plus")
+            )
+        self.llm = llm
+        self.poi_limit = poi_limit or int(os.getenv("TRIPMIND_REALTIME_POI_LIMIT", "6"))
+        self.strategy = os.getenv("DASHSCOPE_SEARCH_STRATEGY", "turbo")
+
+    @staticmethod
+    def _extract_json(text: str) -> dict:
+        text = text.strip()
+        if text.startswith("```"):
+            lines = text.splitlines()
+            if lines and lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].strip().startswith("```"):
+                lines = lines[:-1]
+            text = "\n".join(lines).strip()
+        start, end = text.find("{"), text.rfind("}")
+        if start < 0 or end < start:
+            raise ValueError("Realtime search did not return a JSON object.")
+        return json.loads(text[start : end + 1])
+
+    def _query(self, prompt: str) -> list[RealtimeSignal]:
+        system = """You extract current travel information from web search.
+Return JSON only with this schema:
+{"signals":[
+  {
+    "kind":"weather|closure|opening_hours|promotion|event|alert",
+    "subject":"city or exact POI name",
+    "summary":"short factual travel-relevant statement",
+    "effect":"avoid|prefer|prefer_indoor|info",
+    "confidence":"high|medium|low",
+    "hard_constraint":false
+  }
+]}
+Rules:
+- Include only time-sensitive facts relevant to the requested travel date/location.
+- Omit uncertain, stale, or unrelated information instead of guessing.
+- Weather that makes outdoor visits less suitable should use prefer_indoor.
+- Promotions are soft context: never set hard_constraint=true.
+- hard_constraint=true is only for an explicit current closure/unavailability,
+  and only when confidence=high.
+- Do not turn an old promotion or old closure into a current fact.
+"""
+        text = self.llm.chat(
+            [
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.0,
+            enable_search=True,
+            force_search=True,
+            search_strategy=self.strategy,
+        )
+        payload = self._extract_json(text)
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        signals: list[RealtimeSignal] = []
+        for item in payload.get("signals", []):
+            kind = str(item.get("kind", "alert"))
+            effect = str(item.get("effect", "info"))
+            confidence = str(item.get("confidence", "medium"))
+            if kind not in self.ALLOWED_KINDS:
+                continue
+            if effect not in self.ALLOWED_EFFECTS:
+                effect = "info"
+            if confidence not in self.ALLOWED_CONFIDENCE:
+                confidence = "medium"
+            hard = bool(item.get("hard_constraint", False))
+            if kind not in {"closure", "alert"} or confidence != "high":
+                hard = False
+            signals.append(
+                RealtimeSignal(
+                    kind=kind,
+                    subject=str(item.get("subject", "")).strip(),
+                    summary=str(item.get("summary", "")).strip(),
+                    effect=effect,
+                    confidence=confidence,
+                    source="Alibaba Cloud Model Studio web search",
+                    hard_constraint=hard,
+                    retrieved_at=now,
+                )
+            )
+        return [s for s in signals if s.subject and s.summary]
+
+    def fetch(self, profile: UserProfile, pois: Sequence[POI]) -> list[RealtimeSignal]:
+        travel_date = profile.start_date or "the current/near-term travel date"
+        city_prompt = f"""Travel location: {profile.city}, {profile.country}
+Travel date: {travel_date}
+Find only current travel-relevant city context:
+1. weather/forecast that may change indoor-vs-outdoor planning;
+2. major local events that could be useful to a visitor;
+3. major alerts likely to affect sightseeing.
+Keep the result concise."""
+
+        selected = list(pois[: self.poi_limit])
+        poi_names = ", ".join(p.name for p in selected)
+        poi_prompt = f"""Travel location: {profile.city}, {profile.country}
+Travel date: {travel_date}
+Candidate POIs: {poi_names}
+For these POIs only, check current information that could change a plan:
+temporary closure, changed opening hours, official/credible ticket promotion,
+or a time-sensitive event. Omit ordinary static descriptions and omit anything
+whose date is unclear."""
+
+        signals: list[RealtimeSignal] = []
+        for prompt in (city_prompt, poi_prompt):
+            try:
+                signals.extend(self._query(prompt))
+            except Exception:
+                # Realtime enrichment must never make the whole planner unusable.
+                continue
+        return signals

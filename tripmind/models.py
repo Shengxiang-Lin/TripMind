@@ -13,8 +13,11 @@ class UserProfile:
     travel_group: str = "couple"
     interests: List[str] = field(default_factory=lambda: ["photography", "food", "culture"])
     pace: str = "relaxed"
-    transport_preference: str = "transit"
+    transport_preference: str = "walking"
     special_preferences: List[str] = field(default_factory=list)
+    country: str = "China"
+    start_date: Optional[str] = None
+    currency: str = "CNY"
 
 
 @dataclass
@@ -35,6 +38,10 @@ class POI:
     intensity: str = "low"
     description: str = ""
     image_url: Optional[str] = None
+    country: str = "China"
+    currency: str = "CNY"
+    indoor: Optional[bool] = None
+    source: Optional[str] = None
 
 
 @dataclass
@@ -51,6 +58,30 @@ class RouteLeg:
     distance_km: float
     duration_min: int
     mode: str
+    source: str = "local_estimate"
+    grounded: bool = False
+    geometry: Optional[List[List[float]]] = None
+
+
+@dataclass
+class RouteMatrix:
+    names: List[str]
+    distances_km: List[List[Optional[float]]]
+    durations_min: List[List[Optional[int]]]
+    source: str
+    grounded: bool
+
+
+@dataclass
+class RealtimeSignal:
+    kind: str
+    subject: str
+    summary: str
+    effect: str = "info"
+    confidence: str = "medium"
+    source: str = "unknown"
+    hard_constraint: bool = False
+    retrieved_at: Optional[str] = None
 
 
 @dataclass
@@ -77,3 +108,4 @@ class Itinerary:
     days: List[DayPlan]
     total_estimated_cost: float
     retrieved_knowledge: List[str]
+    realtime_signals: List[RealtimeSignal] = field(default_factory=list)

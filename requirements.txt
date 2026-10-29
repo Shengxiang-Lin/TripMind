@@ -2,3 +2,4 @@ gradio>=5.0
 pydantic>=2.7
 python-dotenv>=1.0
 openai>=1.50
+requests>=2.32
