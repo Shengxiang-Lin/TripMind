@@ -5,4 +5,6 @@ dashscope:
   api_key: "YOUR_DASHSCOPE_API_KEY"
 
 ors:
+  # Optional on networks where default TLS negotiation times out:
+  # tls_maximum_version: "TLSv1_2"
   api_key: "YOUR_ORS_API_KEY"

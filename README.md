@@ -531,3 +531,67 @@ data/knowledge/
 ## Design principle
 
 > Use SFT to learn **preferences**, RAG to retrieve **stable travel knowledge**, realtime tools to observe **changing external context**, routing services to ground **distance/time**, and deterministic planning code to enforce **constraints**.
+
+
+## Small end-to-end validation on downloaded data
+
+Use the existing `orchestra-o1` environment on the server. For a new environment,
+`requirements-runtime.txt` contains the minimal app/data dependencies; the larger
+`requirements.txt` is an environment snapshot.
+
+```bash
+conda activate orchestra-o1
+python -m pip install -r requirements-runtime.txt
+
+# Environment variables have priority over local YAML. Remove an inherited stale
+# key to use the key already provided in configs/config.local.yaml.
+unset DASHSCOPE_API_KEY
+
+# Offline: prepare 12 Hangzhou POIs, Wikivoyage text chunks and 3 benchmark queries.
+python scripts/prepare_sample_data.py --limit 12
+
+# Offline regression checks.
+python evaluation/config_smoke.py
+python evaluation/smoke.py
+python evaluation/realtime_mock.py
+python evaluation/regression.py
+
+# Small real-API run: two profiles plus a Gradio HTTP prediction.
+# This makes paid Qwen requests and consumes a small ORS quota.
+python evaluation/live_smoke.py --ui
+```
+
+The sample importer writes only `data/processed/sample/`. It uses the Chinese
+Sandbox attraction table, the Chinese Wikivoyage Hangzhou article and the
+ChinaTravel easy queries; it does not overwrite raw files or the bundled demo.
+It selects POIs within 25 km of the Hangzhou center and retains source/license
+metadata. Tags, intensity and neutral popularity are baseline derivations, not
+human labels; visit duration is the midpoint of source min/max hours converted
+to minutes. The textual cleaner is a small sample extractor, not a complete
+MediaWiki parser. ChinaTravel constraint programs are kept as data, never executed.
+
+To start the app with the generated data and your local API configuration:
+
+```bash
+TRIPMIND_CONFIG=data/processed/sample/config.yaml python app.py
+```
+
+Results are saved under `data/processed/live_smoke/`: `report.json`, per-case JSON
+and Markdown itineraries, and `ui_result.md` when `--ui` is used. A live check fails
+if realtime fails, a selected road leg uses local estimates, or scheduling/budget
+checks fail. Repeated UI requests exercise the in-memory realtime/matrix caches.
+These checks cover the baseline pipeline, not every constraint of the full
+ChinaTravel benchmark or a trained personalized model.
+
+Server compatibility notes:
+
+- An inherited `DASHSCOPE_API_KEY` can shadow a valid YAML key. Conflicts now emit
+  a warning containing the variable name only; no key is logged.
+- In this server's OpenSSL/network combination, default ORS TLS negotiation timed
+  out. Setting `ors.tls_maximum_version: TLSv1_2` in local YAML restored verified
+  HTTPS. This setting is optional and scoped to ORS; certificate verification stays on.
+- ORS GeoJSON directions require `Accept: application/geo+json`; the matrix uses JSON.
+- The planner requests one candidate matrix, preserves unreachable pairs, and
+  accepts a source closing time of `24:00`.
+- Realtime errors are shown as planning notices. Failed/partial lookups are not
+  cached as successful empty results. Gradio analytics is disabled for local runs.

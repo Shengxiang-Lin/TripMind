@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import warnings
 from copy import deepcopy
 from functools import lru_cache
 from pathlib import Path
@@ -104,6 +105,14 @@ def get_config() -> dict[str, Any]:
 
     for dotted, env_name in _ENV_OVERRIDES.items():
         if env_name in os.environ and os.environ[env_name] != "":
+            if dotted.endswith("api_key"):
+                file_key = _get_path(config, dotted)
+                if file_key and str(file_key) != os.environ[env_name]:
+                    warnings.warn(
+                        f"{env_name} overrides a different API key from YAML. "
+                        f"Unset {env_name} to use configs/config.local.yaml.",
+                        RuntimeWarning, stacklevel=2,
+                    )
             _set_path(config, dotted, os.environ[env_name])
 
     return config

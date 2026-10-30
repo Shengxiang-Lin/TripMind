@@ -109,3 +109,5 @@ class Itinerary:
     total_estimated_cost: float
     retrieved_knowledge: List[str]
     realtime_signals: List[RealtimeSignal] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+    realtime_status: str = "disabled"

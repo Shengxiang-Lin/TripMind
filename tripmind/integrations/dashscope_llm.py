@@ -37,7 +37,13 @@ class DashScopeLLM:
             or "https://dashscope.aliyuncs.com/compatible-mode/v1"
         )
         self.model = model or dashscope.get("model", "qwen-plus")
-        self.client = OpenAI(api_key=api_key, base_url=base_url)
+        self.client = OpenAI(
+            api_key=api_key, base_url=base_url,
+            timeout=float(dashscope.get("timeout_seconds", 45)),
+            max_retries=int(dashscope.get("max_retries", 0)),
+        )
+        self.last_usage: dict[str, Any] = {}
+        self.call_count = 0
 
     def chat(
         self,
@@ -52,6 +58,7 @@ class DashScopeLLM:
         body: dict[str, Any] = dict(extra_body or {})
         if enable_search:
             body["enable_search"] = True
+            body["include_tool_usage"] = True
             body["search_options"] = {
                 "search_strategy": search_strategy,
                 "forced_search": force_search,
@@ -65,5 +72,7 @@ class DashScopeLLM:
         if body:
             kwargs["extra_body"] = body
 
+        self.call_count += 1
         response = self.client.chat.completions.create(**kwargs)
+        self.last_usage = response.usage.model_dump() if response.usage else {}
         return response.choices[0].message.content or ""

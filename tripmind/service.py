@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date
+import math
 from typing import Any, List, Mapping
 
 from .config import get_config, resolve_project_path
@@ -85,6 +87,12 @@ class TripMindService:
         self.planner = GreedyConstraintPlanner(self.map)
 
     def plan(self, profile: UserProfile) -> Itinerary:
+        if isinstance(profile.days, bool) or not isinstance(profile.days, int) or profile.days < 1:
+            raise ValueError("Trip days must be a positive integer.")
+        if not math.isfinite(profile.budget) or profile.budget < 0:
+            raise ValueError("Budget must be a finite nonnegative number.")
+        if profile.start_date:
+            date.fromisoformat(profile.start_date)
         candidates = city_pois(self.pois, profile.city, profile.country)
         if not candidates:
             raise ValueError(
@@ -92,14 +100,25 @@ class TripMindService:
                 f"country={profile.country!r} in the current local dataset."
             )
 
+        if any(poi.currency != profile.currency for poi in candidates):
+            raise ValueError("Budget currency must match the POI currency; exchange-rate conversion is not configured.")
         knowledge = self.rag.retrieve(profile, top_k=5)
         ranked = self.ranker.rank(profile, candidates, knowledge)
 
         realtime_candidates = [x.poi for x in ranked[: min(12, len(ranked))]]
+        warnings: list[str] = []
         try:
             signals = self.realtime.fetch(profile, realtime_candidates)
-        except Exception:
+            warnings.extend(getattr(self.realtime, "last_errors", []))
+        except Exception as exc:
             signals = []
+            warnings.append(f"Realtime lookup failed ({type(exc).__name__}).")
+        if isinstance(self.realtime, NullRealtimeProvider):
+            realtime_status = "disabled"
+        elif warnings:
+            realtime_status = "partial" if signals else "failed"
+        else:
+            realtime_status = "ok"
 
         ranked = self.realtime_adjuster.apply(profile, ranked, signals)
         blocked = {
@@ -110,12 +129,19 @@ class TripMindService:
 
         days = self.planner.plan(profile, ranked, blocked_pois=blocked)
         total_cost = round(sum(day.estimated_cost for day in days), 2)
+        if isinstance(self.map, FallbackMapProvider) and any(
+            item.travel_from_previous and not item.travel_from_previous.grounded
+            for day in days for item in day.items
+        ):
+            warnings.append("Road routing was unavailable or unsupported; some travel legs use local estimates.")
         return Itinerary(
             profile=profile,
             days=days,
             total_estimated_cost=total_cost,
             retrieved_knowledge=knowledge,
             realtime_signals=signals,
+            warnings=warnings,
+            realtime_status=realtime_status,
         )
 
 
@@ -147,6 +173,11 @@ def itinerary_to_markdown(itinerary: Itinerary) -> str:
         f"{p.currency} {itinerary.total_estimated_cost:.0f}"
     )
     lines.append("")
+
+    if itinerary.warnings:
+        lines.append("## Planning notices")
+        lines.extend(f"- {warning}" for warning in itinerary.warnings)
+        lines.append("")
 
     if itinerary.realtime_signals:
         lines.append("## Realtime context")
@@ -199,9 +230,11 @@ def itinerary_to_markdown(itinerary: Itinerary) -> str:
     else:
         lines.append("> No inter-POI route leg was needed for this plan.")
 
-    if not itinerary.realtime_signals:
+    if itinerary.realtime_status in {"disabled", "failed"}:
         lines.append(
             "> Realtime enrichment is currently disabled/unavailable. Configure a "
             "DashScope key to enable Alibaba Cloud web-search context."
         )
+    elif itinerary.realtime_status == "ok" and not itinerary.realtime_signals:
+        lines.append("> Realtime lookup completed; no relevant current signals were returned.")
     return "\n".join(lines)

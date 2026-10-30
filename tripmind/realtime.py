@@ -30,12 +30,14 @@ class CachingRealtimeProvider(RealtimeProvider):
         self.inner = inner
         self.ttl_seconds = ttl_seconds
         self._cache: dict[tuple, tuple[float, list[RealtimeSignal]]] = {}
+        self.last_errors: list[str] = []
 
     def _key(self, profile: UserProfile, pois: Sequence[POI]) -> tuple:
         return (
             profile.country.casefold(),
             profile.city.casefold(),
             profile.start_date or "",
+            profile.days,
             tuple(sorted(p.poi_id for p in pois)),
         )
 
@@ -44,9 +46,12 @@ class CachingRealtimeProvider(RealtimeProvider):
         now = time.monotonic()
         hit = self._cache.get(key)
         if hit and now - hit[0] < self.ttl_seconds:
+            self.last_errors = []
             return list(hit[1])
         signals = self.inner.fetch(profile, pois)
-        self._cache[key] = (now, list(signals))
+        self.last_errors = list(getattr(self.inner, "last_errors", []))
+        if not self.last_errors:
+            self._cache[key] = (now, list(signals))
         return signals
 
 
@@ -87,6 +92,8 @@ class DashScopeRealtimeProvider(RealtimeProvider):
             poi_limit if poi_limit is not None else realtime.get("poi_limit", 6)
         )
         self.strategy = str(dashscope.get("search_strategy", "turbo"))
+        self.last_errors: list[str] = []
+        self.usage_history: list[dict] = []
 
     @staticmethod
     def _extract_json(text: str) -> dict:
@@ -135,10 +142,15 @@ Rules:
             force_search=True,
             search_strategy=self.strategy,
         )
+        self.usage_history.append(dict(getattr(self.llm, "last_usage", {})))
         payload = self._extract_json(text)
+        if not isinstance(payload.get("signals", []), list):
+            raise ValueError("Realtime signals must be a JSON list")
         now = datetime.now(timezone.utc).isoformat(timespec="seconds")
         signals: list[RealtimeSignal] = []
         for item in payload.get("signals", []):
+            if not isinstance(item, dict):
+                continue
             kind = str(item.get("kind", "alert"))
             effect = str(item.get("effect", "info"))
             confidence = str(item.get("confidence", "medium"))
@@ -148,8 +160,8 @@ Rules:
                 effect = "info"
             if confidence not in self.ALLOWED_CONFIDENCE:
                 confidence = "medium"
-            hard = bool(item.get("hard_constraint", False))
-            if kind not in {"closure", "alert"} or confidence != "high":
+            hard = item.get("hard_constraint") is True
+            if kind not in {"closure", "alert"} or confidence != "high" or effect != "avoid":
                 hard = False
             signals.append(
                 RealtimeSignal(
@@ -168,7 +180,8 @@ Rules:
     def fetch(self, profile: UserProfile, pois: Sequence[POI]) -> list[RealtimeSignal]:
         travel_date = profile.start_date or "the current/near-term travel date"
         city_prompt = f"""Travel location: {profile.city}, {profile.country}
-Travel date: {travel_date}
+Travel start date: {travel_date}
+Trip duration: {profile.days} days
 Find only current travel-relevant city context:
 1. weather/forecast that may change indoor-vs-outdoor planning;
 2. major local events that could be useful to a visitor;
@@ -178,18 +191,19 @@ Keep the result concise."""
         selected = list(pois[: self.poi_limit])
         poi_names = ", ".join(p.name for p in selected)
         poi_prompt = f"""Travel location: {profile.city}, {profile.country}
-Travel date: {travel_date}
+Travel start date: {travel_date}
+Trip duration: {profile.days} days
 Candidate POIs: {poi_names}
 For these POIs only, check current information that could change a plan:
 temporary closure, changed opening hours, official/credible ticket promotion,
 or a time-sensitive event. Omit ordinary static descriptions and omit anything
 whose date is unclear."""
 
+        self.last_errors = []
         signals: list[RealtimeSignal] = []
-        for prompt in (city_prompt, poi_prompt):
+        for label, prompt in [("city", city_prompt), ("POI", poi_prompt)]:
             try:
                 signals.extend(self._query(prompt))
-            except Exception:
-                # Realtime enrichment must never make the whole planner unusable.
-                continue
+            except Exception as exc:
+                self.last_errors.append(f"Realtime {label} lookup failed ({type(exc).__name__}).")
         return signals

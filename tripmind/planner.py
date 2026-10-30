@@ -1,15 +1,19 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import List
 
 from .map_provider import MapProvider
-from .models import DayPlan, RankedPOI, ScheduleItem, UserProfile
+from .models import DayPlan, RankedPOI, RouteLeg, ScheduleItem, UserProfile
 
 
 def _to_min(hhmm: str) -> int:
-    dt = datetime.strptime(hhmm, "%H:%M")
-    return dt.hour * 60 + dt.minute
+    parts = hhmm.split(":")
+    if len(parts) != 2 or any(len(p) != 2 or not p.isdigit() for p in parts):
+        raise ValueError(f"Invalid time: {hhmm!r}")
+    hour, minute = map(int, parts)
+    if not (0 <= hour <= 24 and 0 <= minute <= 59) or (hour == 24 and minute):
+        raise ValueError(f"Invalid time: {hhmm!r}")
+    return hour * 60 + minute
 
 
 def _blocked(name: str, blocked_names: set[str]) -> bool:
@@ -43,6 +47,11 @@ class GreedyConstraintPlanner:
             for item in ranked[: max(8, profile.days * 5)]
             if not _blocked(item.poi.name, blocked_pois)
         ]
+        matrix = (
+            self.map.matrix([item.poi for item in remaining], profile.transport_preference)
+            if len(remaining) > 1 else None
+        )
+        indices = {item.poi.poi_id: idx for idx, item in enumerate(remaining)}
         daily_budget = profile.budget / max(1, profile.days)
         days: List[DayPlan] = []
 
@@ -59,11 +68,17 @@ class GreedyConstraintPlanner:
                 feasible = []
                 for cand in remaining:
                     poi = cand.poi
-                    leg = (
-                        self.map.route(previous.poi, poi, profile.transport_preference)
-                        if previous
-                        else None
-                    )
+                    leg = None
+                    if previous and matrix is not None:
+                        a, b = indices[previous.poi.poi_id], indices[poi.poi_id]
+                        duration = matrix.durations_min[a][b]
+                        distance_km = matrix.distances_km[a][b]
+                        if duration is None or distance_km is None:
+                            continue
+                        leg = RouteLeg(
+                            previous.poi.name, poi.name, distance_km, duration,
+                            profile.transport_preference, matrix.source, matrix.grounded,
+                        )
                     travel = leg.duration_min if leg else 0
                     arrival = current_min + travel
                     opening = _to_min(poi.opening_time)

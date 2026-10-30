@@ -1,12 +1,34 @@
 from __future__ import annotations
 
+import ssl
 from typing import Any, Mapping, Sequence
 
 import requests
+from requests.adapters import HTTPAdapter
 
 from ..config import get_config
 from ..map_provider import MapProvider
 from ..models import POI, RouteLeg, RouteMatrix
+
+
+class TLSAdapter(HTTPAdapter):
+    """Optional TLS cap scoped to this provider, with certificate verification."""
+
+    def __init__(self, maximum_version: str, **kwargs):
+        versions = {"TLSv1_2": ssl.TLSVersion.TLSv1_2, "TLSv1_3": ssl.TLSVersion.TLSv1_3}
+        if maximum_version not in versions:
+            raise ValueError("ors.tls_maximum_version must be TLSv1_2 or TLSv1_3")
+        self.context = ssl.create_default_context()
+        self.context.maximum_version = versions[maximum_version]
+        super().__init__(**kwargs)
+
+    def init_poolmanager(self, *args, **kwargs):
+        kwargs["ssl_context"] = self.context
+        return super().init_poolmanager(*args, **kwargs)
+
+    def proxy_manager_for(self, proxy, **kwargs):
+        kwargs["ssl_context"] = self.context
+        return super().proxy_manager_for(proxy, **kwargs)
 
 
 class OpenRouteServiceProvider(MapProvider):
@@ -49,6 +71,13 @@ class OpenRouteServiceProvider(MapProvider):
             timeout if timeout is not None else ors.get("timeout_seconds", 15)
         )
 
+        self.session = requests.Session()
+        maximum_version = ors.get("tls_maximum_version")
+        if maximum_version:
+            self.session.mount("https://", TLSAdapter(str(maximum_version)))
+        self.api_calls = 0
+        self._matrix_cache: dict[tuple, RouteMatrix] = {}
+
     def supports(self, mode: str) -> bool:
         return mode in self.PROFILE_BY_MODE
 
@@ -65,9 +94,10 @@ class OpenRouteServiceProvider(MapProvider):
 
         profile = self.PROFILE_BY_MODE[mode]
         url = f"{self.base_url}/v2/directions/{profile}/geojson"
-        response = requests.post(
+        self.api_calls += 1
+        response = self.session.post(
             url,
-            headers=self._headers(),
+            headers={**self._headers(), "Accept": "application/geo+json"},
             json={
                 "coordinates": [
                     [origin.longitude, origin.latitude],
@@ -99,9 +129,13 @@ class OpenRouteServiceProvider(MapProvider):
         if not pois:
             return RouteMatrix([], [], [], "openrouteservice", True)
 
+        cache_key = (mode, tuple((p.name, p.longitude, p.latitude) for p in pois))
+        if cache_key in self._matrix_cache:
+            return self._matrix_cache[cache_key]
         profile = self.PROFILE_BY_MODE[mode]
         url = f"{self.base_url}/v2/matrix/{profile}"
-        response = requests.post(
+        self.api_calls += 1
+        response = self.session.post(
             url,
             headers=self._headers(),
             json={
@@ -125,10 +159,19 @@ class OpenRouteServiceProvider(MapProvider):
             ]
             for row in payload.get("durations", [])
         ]
-        return RouteMatrix(
+        n = len(pois)
+        if len(distances) != n or len(durations) != n or any(
+            len(row) != n for row in distances + durations
+        ):
+            raise ValueError("ORS returned a malformed route matrix")
+        matrix = RouteMatrix(
             names=[p.name for p in pois],
             distances_km=distances,
             durations_min=durations,
             source="openrouteservice",
             grounded=True,
         )
+        if len(self._matrix_cache) >= 32:
+            self._matrix_cache.pop(next(iter(self._matrix_cache)))
+        self._matrix_cache[cache_key] = matrix
+        return matrix

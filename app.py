@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from datetime import date
+import os
+
+os.environ.setdefault("GRADIO_ANALYTICS_ENABLED", "False")
 
 import gradio as gr
 
@@ -36,28 +39,28 @@ def generate(
     transport,
     notes,
 ):
-    profile = UserProfile(
-        country=(country or "China").strip(),
-        city=city.strip() or "杭州",
-        start_date=start_date.strip() or None,
-        days=int(days),
-        budget=float(budget),
-        currency=currency,
-        age_group=age_group,
-        travel_group=travel_group,
-        interests=interests or ["culture"],
-        pace=pace,
-        transport_preference=transport,
-        special_preferences=[x.strip() for x in notes.split(",") if x.strip()],
-    )
     try:
+        profile = UserProfile(
+            country=(country or "China").strip(),
+            city=city.strip() or "杭州",
+            start_date=start_date.strip() or None,
+            days=int(days),
+            budget=float(budget),
+            currency=currency,
+            age_group=age_group,
+            travel_group=travel_group,
+            interests=interests or ["culture"],
+            pace=pace,
+            transport_preference=transport,
+            special_preferences=[x.strip() for x in notes.split(",") if x.strip()],
+        )
         result = service.plan(profile)
         return itinerary_to_markdown(result)
     except Exception as exc:
         return f"### Planning failed\n\n`{type(exc).__name__}: {exc}`"
 
 
-with gr.Blocks(title="TripMind") as demo:
+with gr.Blocks(title="TripMind", analytics_enabled=False) as demo:
     gr.Markdown(
         "# TripMind\n"
         "Personalized · Knowledge-grounded · Realtime-aware · Constraint-aware\n\n"
@@ -127,6 +130,7 @@ with gr.Blocks(title="TripMind") as demo:
             notes,
         ],
         outputs=output,
+        api_name="plan",
     )
 
 
