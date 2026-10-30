@@ -42,6 +42,8 @@ class POI:
     currency: str = "CNY"
     indoor: Optional[bool] = None
     source: Optional[str] = None
+    aliases: List[str] = field(default_factory=list)
+    source_metadata: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -111,3 +113,4 @@ class Itinerary:
     realtime_signals: List[RealtimeSignal] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
     realtime_status: str = "disabled"
+    knowledge_sources: List[dict] = field(default_factory=list)

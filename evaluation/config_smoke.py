@@ -6,6 +6,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tripmind.config import get_config, resolve_project_path
+from tripmind.bundle import resolve_runtime_data
 
 
 def main() -> None:
@@ -16,8 +17,10 @@ def main() -> None:
     assert "dashscope" in cfg
     assert cfg["ors"]["base_url"].startswith("https://api.heigit.org/")
 
-    poi_dir = resolve_project_path(cfg["data"]["poi_dir"])
-    knowledge = resolve_project_path(cfg["data"]["knowledge_file"])
+    data = resolve_runtime_data(cfg["data"])
+    poi_dir = resolve_project_path(data["poi_dir"])
+    knowledge = resolve_project_path(data.get("knowledge_index", data["knowledge_file"]))
+    print("Data bundle:",data.get("bundle_id","bundled demo"))
 
     print("CONFIG OK")
     print("route provider:", cfg["providers"]["route"])

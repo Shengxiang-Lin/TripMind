@@ -595,3 +595,89 @@ Server compatibility notes:
   accepts a source closing time of `24:00`.
 - Realtime errors are shown as planning notices. Failed/partial lookups are not
   cached as successful empty results. Gradio analytics is disabled for local runs.
+
+## Full offline data pipeline
+
+The full pipeline replaces the small Hangzhou-only extraction with a versioned
+bundle. Use the server's `orchestra-o1` environment:
+
+```bash
+conda activate orchestra-o1
+python -m pip install -r requirements-data.txt
+python scripts/build_data.py
+```
+
+No model, embedding or map API is called during ingestion. The builder reads all
+14 bilingual Sandbox Parquet tables, every ChinaTravel CSV (including Phase 2),
+and both downloaded Wikivoyage article dumps. It never modifies the raw inputs.
+
+The active pointer is `data/processed/production/current.json`. Each immutable
+build under `data/processed/production/runs/<build_id>/` contains:
+
+- `poi/*.json`: canonical Chinese attraction records for all 10 source cities,
+  with English aliases and source lineage. Chinese/English copies are one entity.
+- `catalog.sqlite`: all seven Sandbox reference tables in both languages. Restaurant,
+  accommodation and transport source payloads are retained with canonical destination
+  metadata; they are not silently scheduled as sightseeing attractions.
+- `cities.json`: supported destination names and aliases.
+- `knowledge/chunks.jsonl` and `knowledge/documents.sqlite`: cleaned namespace-zero,
+  non-redirect articles with source URLs, page/revision IDs, language and license.
+- `knowledge/tfidf.npz`, `vectorizer.joblib`, `index.json`: a local sparse TF-IDF
+  cosine index over Latin words and simplified-Chinese bigrams. This is lexical
+  vector retrieval, not a neural semantic embedding model.
+- `queries/{all,train,validation,test}.jsonl`: normalized requests and constraint
+  programs as data. They contain no fabricated ranking answers or SFT labels.
+- `quarantine_pois.jsonl`, `quarantine_queries.json`, `poi_duplicates.json`:
+  rejected rows, reasons and merges.
+- `quality_report.json` and `manifest.json`: counts, validation results, versions,
+  settings, source SHA256 digests and artifact checksums.
+
+Exact duplicates are removed. Same-name attraction records within 100 metres
+are merged conservatively, retaining source IDs and English aliases. Missing or
+invalid cost, coordinate and duration values are rejected rather than filled with
+invented facts. Source minimum/maximum visit hours are converted to midpoint
+minutes. Popularity and preference tags remain documented heuristic defaults.
+For overnight venues, only the evening-to-midnight interval is exposed to the
+09:00-20:00 planner, with original times and this normalization recorded. Coordinate
+reference systems are preserved as unspecified where the dataset does not declare one.
+
+Wiki parsing uses `mwparserfromhell`, removes navigation/media/reference noise,
+preserves listing names/descriptions, and creates bounded overlapping text chunks.
+Supported destination aliases map English and traditional-Chinese titles to the
+canonical city. Other article titles remain separate destinations; country values
+are not guessed. Retrieval filters city/country before ranking and returns source
+citations. Region-to-city inheritance is not inferred in this version.
+
+Query splitting groups preference variants by their base UID, Phase 2 variants by
+source seed, and identical requests even when their UIDs differ. Official
+`human1000` and competition-test families stay entirely in test. Other groups use
+a seed-stable 80/10/10 hash split. Incomplete profile metadata, such as in
+`human1000`, is retained and flagged. DSL programs are never executed by this
+pipeline. Full benchmark constraint evaluation and model training remain separate.
+
+Only a validated build is published, by atomic replacement of `current.json`.
+Build IDs depend on raw content, transformation code, settings and package versions.
+Repeating the same build reuses checksum-verified artifacts. Failed builds leave
+the previously active pointer unchanged. Older complete builds remain available.
+Use `--no-publish` to build without changing the active pointer, or `--output` to
+create a separate bundle root. `--cities` supports bounded city subsets; the default
+processes all source cities. The chunk size, overlap and split seed are configurable.
+
+Default application configuration uses the active processed bundle. To select a
+bundle root, set `TRIPMIND_DATA_BUNDLE`; to run the original bundled demo instead,
+set `TRIPMIND_USE_PROCESSED=false`. An explicitly generated sample configuration
+keeps `data.use_processed=false`. Processed bundles fail fast on missing manifests,
+unsupported schemas or changed artifact checksums instead of silently reverting to
+the demo. Only locally generated, verified vectorizer artifacts should be loaded.
+
+```bash
+python evaluation/data_pipeline.py       # small offline fixtures
+python evaluation/production_data.py     # full bundle + all-city offline plans
+unset DASHSCOPE_API_KEY                  # only if an inherited key shadows local YAML
+python evaluation/live_smoke.py --production --ui --output data/processed/production_live
+python app.py                           # now reads the processed bundle by default
+```
+
+This stage prepares reliable data and the baseline retrieval/planning path. It does
+not train a personalized ranker, invent preference labels, or claim the complete
+ChinaTravel benchmark has been solved.

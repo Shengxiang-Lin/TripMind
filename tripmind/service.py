@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from dataclasses import replace
+import json
 from datetime import date
 import math
 from typing import Any, List, Mapping
 
 from .config import get_config, resolve_project_path
+from .bundle import resolve_runtime_data
+from .processing.common import normalized
 from .data import city_pois, load_pois
 from .map_provider import FallbackMapProvider, LocalMapProvider, MapProvider
 from .models import Itinerary, RealtimeSignal, UserProfile
@@ -71,7 +75,11 @@ class TripMindService:
         config: Mapping[str, Any] | None = None,
     ):
         self.config = dict(config or get_config())
-        data_cfg = self.config.get("data", {})
+        data_cfg = resolve_runtime_data(self.config.get("data", {}))
+        self.data_bundle_id = data_cfg.get("bundle_id")
+        aliases_file = data_cfg.get("city_aliases_file")
+        self.city_registry = json.loads(resolve_project_path(aliases_file).read_text()) if aliases_file else {}
+        self.city_lookup = {normalized(alias):city for city,meta in self.city_registry.items() for alias in meta["aliases"]}
 
         poi_dir = resolve_project_path(data_cfg.get("poi_dir", "data/poi"))
         knowledge_file = resolve_project_path(
@@ -79,7 +87,12 @@ class TripMindService:
         )
 
         self.pois = load_pois(poi_dir)
-        self.rag = LocalKnowledgeRetriever(knowledge_file)
+        if data_cfg.get("knowledge_index"):
+            from .vector_rag import load_vector_retriever
+            self.rag = load_vector_retriever(str(resolve_project_path(data_cfg["knowledge_index"])))
+        else:
+            self.rag = LocalKnowledgeRetriever(knowledge_file)
+        self.available_cities = sorted({p.city for p in self.pois})
         self.ranker = HeuristicPersonalizedRanker()
         self.realtime_adjuster = RealtimeAdjustmentEngine()
         self.map = map_provider or build_map_provider(self.config)
@@ -87,6 +100,9 @@ class TripMindService:
         self.planner = GreedyConstraintPlanner(self.map)
 
     def plan(self, profile: UserProfile) -> Itinerary:
+        city = self.city_lookup.get(normalized(profile.city),profile.city)
+        country = "China" if normalized(profile.country) in {"china","中国","中华人民共和国","prc",""} else profile.country
+        profile = replace(profile,city=city,country=country)
         if isinstance(profile.days, bool) or not isinstance(profile.days, int) or profile.days < 1:
             raise ValueError("Trip days must be a positive integer.")
         if not math.isfinite(profile.budget) or profile.budget < 0:
@@ -102,7 +118,10 @@ class TripMindService:
 
         if any(poi.currency != profile.currency for poi in candidates):
             raise ValueError("Budget currency must match the POI currency; exchange-rate conversion is not configured.")
-        knowledge = self.rag.retrieve(profile, top_k=5)
+        documents = self.rag.retrieve_documents(profile, top_k=5)
+        knowledge = [doc["text"] for doc in documents]
+        knowledge_sources = [{k:doc.get(k) for k in ["doc_id","title","source","license","language","score","city"]}
+                             for doc in documents if doc.get("source")]
         ranked = self.ranker.rank(profile, candidates, knowledge)
 
         realtime_candidates = [x.poi for x in ranked[: min(12, len(ranked))]]
@@ -139,6 +158,7 @@ class TripMindService:
             days=days,
             total_estimated_cost=total_cost,
             retrieved_knowledge=knowledge,
+            knowledge_sources=knowledge_sources,
             realtime_signals=signals,
             warnings=warnings,
             realtime_status=realtime_status,
@@ -219,6 +239,16 @@ def itinerary_to_markdown(itinerary: Itinerary) -> str:
             f"{day.travel_duration_min} min**"
         )
 
+    if itinerary.knowledge_sources:
+        lines.append("\n## Static knowledge sources")
+        seen_sources = set()
+        for source in itinerary.knowledge_sources:
+            url = source["source"]
+            if url in seen_sources or not url.startswith("https://"):
+                continue
+            seen_sources.add(url)
+            title = str(source.get("title", "Wikivoyage")).replace("[", "").replace("]", "")
+            lines.append(f"- [{title}]({url}) · {source.get('license', '')}")
     lines.append("\n---")
     if used_estimated_route:
         lines.append(

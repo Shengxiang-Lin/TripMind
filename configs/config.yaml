@@ -28,6 +28,8 @@ realtime:
   poi_limit: 6
 
 data:
+  use_processed: true
+  bundle_root: "data/processed/production"
   poi_dir: "data/poi"
   knowledge_file: "data/knowledge/travel_knowledge.json"
   raw_dir: "data/raw"

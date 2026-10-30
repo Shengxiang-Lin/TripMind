@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Dict, List
 
 from .models import UserProfile
+from .text import tokens
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -23,9 +24,9 @@ class LocalKnowledgeRetriever:
 
     @staticmethod
     def _tokens(text: str) -> set[str]:
-        return set(re.findall(r"[A-Za-z0-9_\-\u4e00-\u9fff]+", text.lower()))
+        return set(tokens(text))
 
-    def retrieve(self, profile: UserProfile, top_k: int = 5) -> List[str]:
+    def retrieve_documents(self, profile: UserProfile, top_k: int = 5) -> List[Dict]:
         query = " ".join(
             [
                 profile.country,
@@ -39,6 +40,10 @@ class LocalKnowledgeRetriever:
         q = self._tokens(query)
         scored = []
         for doc in self.docs:
+            if doc.get("city", "*") not in {profile.city, "*", ""}:
+                continue
+            if doc.get("country", "*") not in {profile.country, "*", ""}:
+                continue
             haystack = " ".join(
                 [
                     doc.get("title", ""),
@@ -58,4 +63,7 @@ class LocalKnowledgeRetriever:
             )
             scored.append((overlap + city_bonus + country_bonus, doc))
         scored.sort(key=lambda x: x[0], reverse=True)
-        return [x[1]["text"] for x in scored[:top_k] if x[0] > 0]
+        return [{**doc,"score":score} for score,doc in scored[:max(0,top_k)] if score>0]
+
+    def retrieve(self, profile: UserProfile, top_k: int = 5) -> List[str]:
+        return [d["text"] for d in self.retrieve_documents(profile,top_k)]

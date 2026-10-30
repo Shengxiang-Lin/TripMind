@@ -68,6 +68,7 @@ with gr.Blocks(title="TripMind", analytics_enabled=False) as demo:
         "enrich weather/events/POI updates, while openrouteservice can ground "
         "walking/driving/cycling distance and duration."
     )
+    gr.Markdown("Available cities: " + ", ".join(service.available_cities))
     with gr.Row():
         with gr.Column(scale=1):
             country = gr.Textbox(value="China", label="Country")

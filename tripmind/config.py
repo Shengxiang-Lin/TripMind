@@ -15,6 +15,8 @@ DEFAULT_CONFIG_PATH = PROJECT_ROOT / "configs" / "config.yaml"
 LOCAL_CONFIG_PATH = PROJECT_ROOT / "configs" / "config.local.yaml"
 
 _ENV_OVERRIDES = {
+    "data.use_processed": "TRIPMIND_USE_PROCESSED",
+    "data.bundle_root": "TRIPMIND_DATA_BUNDLE",
     "providers.route": "TRIPMIND_ROUTE_PROVIDER",
     "providers.realtime": "TRIPMIND_REALTIME_PROVIDER",
     "ors.api_key": "ORS_API_KEY",

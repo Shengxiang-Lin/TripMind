@@ -55,15 +55,28 @@ def main():
     parser.add_argument("--sample-config", default="data/processed/sample/config.yaml")
     parser.add_argument("--output", default="data/processed/live_smoke")
     parser.add_argument("--start-date", default=datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat())
+    parser.add_argument("--production", action="store_true", help="Use the validated full data bundle")
     parser.add_argument("--ui", action="store_true", help="Also submit a cached request through the Gradio HTTP API")
     args = parser.parse_args()
-    os.environ["TRIPMIND_CONFIG"] = str(resolve_project_path(args.sample_config))
+    if not args.production:
+        os.environ["TRIPMIND_CONFIG"] = str(resolve_project_path(args.sample_config))
     clear_config_cache()
     config = get_config()
+    if args.production:
+        config["data"]["use_processed"] = True
     service = TripMindService(config=config)
+    if args.production:
+        assert service.data_bundle_id, "Production bundle was not selected"
     assert hasattr(service.map, "primary"), "ORS provider was not enabled"
     assert hasattr(service.realtime, "inner"), "DashScope provider was not enabled"
-    query = json.loads((resolve_project_path(args.sample_config).parent/"queries.json").read_text())[0]
+    if args.production:
+        query_file = service.rag.folder.parent/"queries/all.jsonl"
+        row = next(r for r in map(json.loads,query_file.open(encoding="utf-8"))
+                   if "chinatravel/easy.csv" in r["source_files"] and r["target_city"]=="杭州" and r["days"]==1)
+        query = {"uid":row["uid"],"nature_language":row["request"],"target_city":row["target_city"],
+                 "days":row["days"],"people_number":row["people_number"]}
+    else:
+        query = json.loads((resolve_project_path(args.sample_config).parent/"queries.json").read_text())[0]
     budget = re.search(r"预算\s*(\d+)", query["nature_language"])
     first = UserProfile(
         city=query["target_city"], days=int(query["days"]),
@@ -98,7 +111,7 @@ def main():
             "llm_usage": service.realtime.inner.usage_history[usage_start:],
         })
         print(json.dumps(summaries[-1], ensure_ascii=False), flush=True)
-    report = {"sample_config": args.sample_config, "cases": summaries}
+    report = {"sample_config": None if args.production else args.sample_config, "bundle_id":service.data_bundle_id, "cases": summaries}
     if args.ui:
         import app
         import requests

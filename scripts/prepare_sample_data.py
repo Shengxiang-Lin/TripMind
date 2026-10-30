@@ -157,6 +157,7 @@ def main() -> None:
     sample_config = yaml.safe_load((ROOT/"configs/config.yaml").read_text())
     for section in ("ors", "dashscope"):
         sample_config[section]["api_key"] = ""
+    sample_config["data"]["use_processed"] = False
     sample_config["data"]["poi_dir"] = str(out/"poi")
     sample_config["data"]["knowledge_file"] = str(out/"knowledge.json")
     (out/"config.yaml").write_text(yaml.safe_dump(sample_config, allow_unicode=True, sort_keys=False))
