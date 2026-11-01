@@ -27,6 +27,19 @@ realtime:
   ttl_seconds: 3600
   poi_limit: 6
 
+training:
+  ranking:
+    # Candidate POIs shown to the personalized ranking model.
+    candidate_count: 8
+    # Static Wikivoyage chunks attached to each teacher/SFT instance.
+    knowledge_top_k: 3
+    # Qwen teacher used only when --label-mode dashscope is requested.
+    teacher_model: "qwen-plus"
+    # 0/null means all available examples; these caps target a course-scale SFT set.
+    train_limit: 4000
+    validation_limit: 400
+    test_limit: 400
+
 data:
   use_processed: true
   bundle_root: "data/processed/production"
