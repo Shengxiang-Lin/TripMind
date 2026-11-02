@@ -26,6 +26,8 @@ preference_model:
   inference_batch_size: 8
   max_length: null
   history_char_limit: null
+  # Learned GenUP supervision is category-level; the heuristic component provides
+  # within-category differentiation using TripMind tags, budget, group and popularity.
   heuristic_blend: 0.15
 training:
   preference:
@@ -36,6 +38,8 @@ training:
     seed: 42
     validation_fraction: 0.10
     negatives_per_positive: 4
+    # Must remain 0.0 for the transferable category-only prompt. Same-category
+    # GenUP POIs would otherwise produce identical positive/negative model input.
     hard_negative_fraction: 0.0
     max_length: 1024
     history_char_limit: 6000
