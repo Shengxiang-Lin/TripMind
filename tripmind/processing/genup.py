@@ -1,4 +1,4 @@
-"""GenUP adapters for transferable candidate-level preference learning."""
+"""GenUP adapters for transferable category-level travel preference learning."""
 from __future__ import annotations
 
 import random
@@ -144,53 +144,36 @@ def sample_negatives(
     known_user_observed: set[str],
     catalog: dict[str, dict[str, Any]],
     count: int,
-    same_category_fraction: float,
+    same_category_fraction: float = 0.0,
 ) -> list[tuple[str, str]]:
     if count < 1:
         raise ValueError("negatives_per_positive must be at least 1")
-    if not 0 <= same_category_fraction <= 1:
-        raise ValueError("same_category_fraction must be in [0, 1]")
+    if same_category_fraction != 0.0:
+        raise ValueError(
+            "same-category negatives are unsupported for the GenUP category-only prompt: "
+            "two POIs in the same category are textually indistinguishable after POI IDs are removed."
+        )
 
     positive_category = catalog.get(positive_id, {}).get("category_id")
+    if not positive_category:
+        return []
     excluded = set(known_user_observed) | {positive_id}
-    all_pool = [
+    pool = [
         poi_id
         for poi_id in sorted(catalog)
-        if poi_id not in excluded and catalog.get(poi_id, {}).get("category")
+        if poi_id not in excluded
+        and catalog.get(poi_id, {}).get("category")
+        and catalog.get(poi_id, {}).get("category_id") != positive_category
     ]
-    if len(all_pool) < count:
+    if len(pool) < count:
         return []
 
     rng = random.Random(int(stable_id("genup_negative", context_id)[:16], 16))
-    same_category = [
-        poi_id
-        for poi_id in all_pool
-        if positive_category
-        and catalog.get(poi_id, {}).get("category_id") == positive_category
+    rng.shuffle(pool)
+    return [
+        (poi_id, "sampled_unobserved_different_category")
+        for poi_id in pool[:count]
     ]
-    rng.shuffle(same_category)
-    desired_same = min(count, round(count * same_category_fraction))
-    chosen = [
-        (poi_id, "same_category")
-        for poi_id in same_category[:desired_same]
-    ]
-    chosen_ids = {poi_id for poi_id, _ in chosen}
-
-    different_category = [
-        poi_id
-        for poi_id in all_pool
-        if poi_id not in chosen_ids
-        and (
-            not positive_category
-            or catalog.get(poi_id, {}).get("category_id") != positive_category
-        )
-    ]
-    rng.shuffle(different_category)
-    chosen.extend(
-        (poi_id, "random_unobserved_different_category")
-        for poi_id in different_category[: count - len(chosen)]
-    )
-    return chosen if len(chosen) == count else []
 
 
 def iter_preference_contexts(
@@ -202,6 +185,10 @@ def iter_preference_contexts(
     hard_negative_fraction: float = 0.0,
     validation_fraction: float = 0.1,
 ) -> Iterable[dict[str, Any]]:
+    if hard_negative_fraction != 0.0:
+        raise ValueError(
+            "hard_negative_fraction must be 0.0 for the category-only GenUP task."
+        )
     catalog, user_observed = collect_catalog_and_user_observed(root, dataset_name)
 
     for row in iter_raw_rows(root):
@@ -209,7 +196,7 @@ def iter_preference_contexts(
         if not positive_id:
             continue
         positive_payload = candidate_payload(positive_id, catalog)
-        if not positive_payload.get("category"):
+        if not positive_payload.get("category") or not positive_payload.get("category_id"):
             continue
 
         context_id = context_identity(dataset_name, row)
@@ -224,7 +211,7 @@ def iter_preference_contexts(
             known_user_observed=user_observed.get(user_key, set()),
             catalog=catalog,
             count=negatives_per_positive,
-            same_category_fraction=hard_negative_fraction,
+            same_category_fraction=0.0,
         )
         if len(negatives) != negatives_per_positive:
             continue
@@ -236,8 +223,8 @@ def iter_preference_contexts(
             negative_payloads.append(payload)
 
         yield {
-            "schema_version": 2,
-            "task": "candidate_poi_preference",
+            "schema_version": 3,
+            "task": "category_preference_ranking",
             "source_dataset": dataset_name,
             "source_url": source_url,
             "context_id": context_id,
@@ -255,8 +242,7 @@ def iter_preference_contexts(
             "positive_candidate": positive_payload,
             "negative_candidates": negative_payloads,
             "target_text": row["targets"],
-            "supervision": (
-                "original_next_poi_positive_with_sampled_globally_unobserved_negatives"
-            ),
-            "prompt_policy": "omit_dataset_local_poi_ids_use_semantic_categories",
+            "supervision": "original_next_poi_category_vs_sampled_unobserved_different_categories",
+            "prompt_policy": "category_semantics_only_no_dataset_local_poi_ids",
+            "evaluation_scope": "sampled_cross_category_ranking_only",
         }
