@@ -9,8 +9,6 @@ providers:
   realtime: auto
 
 dashscope:
-  # Leave empty in the tracked file. Put real secrets in
-  # configs/config.local.yaml or environment variables.
   api_key: ""
   base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
   model: "qwen-plus"
@@ -19,7 +17,6 @@ dashscope:
 
 ors:
   api_key: ""
-  # New HeiGIT endpoint. api.openrouteservice.org is deprecated.
   base_url: "https://api.heigit.org/openrouteservice"
   timeout_seconds: 15
 
@@ -28,18 +25,24 @@ realtime:
   poi_limit: 6
 
 training:
-  # Public supervision is the primary preference-learning source.
-  public_preferences:
-    seed: 42
-    output_dir: "data/processed/public_preferences"
-  # ChinaTravel listwise ranking is now a small task-alignment/calibration set,
-  # not the main source of thousands of paid teacher labels.
+  # Main small-model supervision: GenUP profile + visit history + real next POI.
+  preference:
+    sources:
+      - nyc
+      - tky
+      - ca
+    output_dir: "data/processed/genup_preference"
+    validation_fraction: 0.10
+    negatives_per_positive: 4
+    hard_negative_fraction: 0.50
+
+  # Optional research/debug utility only; not required for the main model.
   ranking:
     candidate_count: 8
     knowledge_top_k: 3
     teacher_model: "qwen-plus"
-    train_limit: 300
-    validation_limit: 100
+    train_limit: 100
+    validation_limit: 30
     test_limit: 100
 
 data:
@@ -66,10 +69,6 @@ data:
     dump_url: "https://dumps.wikimedia.org/{lang}wikivoyage/latest/{filename}"
 
   public_preferences:
-    stravl:
-      csv_url: "https://raw.githubusercontent.com/Stravl/Stravl-Data/main/Stravl_Travel_Preference_Data.csv"
-      destinations_url: "https://raw.githubusercontent.com/Stravl/Stravl-Data/main/destination_ids.txt"
-      source_url: "https://github.com/Stravl/Stravl-Data"
     genup:
       nyc:
         repo_id: "w11wo/FourSquare-NYC-POI"
@@ -80,3 +79,8 @@ data:
       ca:
         repo_id: "w11wo/Gowalla-CA-POI"
         revision: "main"
+    # Optional auxiliary dataset, not downloaded by --source all/genup.
+    stravl:
+      csv_url: "https://raw.githubusercontent.com/Stravl/Stravl-Data/main/Stravl_Travel_Preference_Data.csv"
+      destinations_url: "https://raw.githubusercontent.com/Stravl/Stravl-Data/main/destination_ids.txt"
+      source_url: "https://github.com/Stravl/Stravl-Data"
