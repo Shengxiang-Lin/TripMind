@@ -151,6 +151,11 @@ def main() -> None:
         args.data_root
         or training_cfg.get("output_dir", "data/processed/genup_preference")
     )
+    manifest_path = data_root / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest.get("evaluation_scope") != "sampled_cross_category_ranking_only":
+        raise ValueError("Unexpected dataset evaluation scope")
+
     paths = sorted(data_root.glob(f"*-{args.split}.jsonl"))
     if not paths:
         raise FileNotFoundError(f"No *-{args.split}.jsonl files under {data_root}")
@@ -185,7 +190,15 @@ def main() -> None:
     result = {
         "checkpoint": str(checkpoint),
         "split": args.split,
-        "candidate_protocol": "1 real next POI + sampled unobserved negatives",
+        "candidate_protocol": (
+            "1 real next-POI category + sampled unobserved POIs from different categories"
+        ),
+        "evaluation_scope": "sampled_cross_category_ranking_only",
+        "same_category_ranking_supported": False,
+        "interpretation": (
+            "Metrics measure category-level preference under sampled cross-category negatives; "
+            "they do not demonstrate ranking quality between two POIs of the same category."
+        ),
         "no_history": args.no_history,
         "no_profile": args.no_profile,
         "overall": aggregate(metric_rows),
