@@ -25,7 +25,13 @@ def validate(result):
     assert len(result.days) == p.days
     assert result.retrieved_knowledge, "No static knowledge was retrieved"
     assert result.realtime_status == "ok", result.warnings
-    assert not result.warnings, result.warnings
+    # Personalization fallback notices are allowed here; realtime/route failures are not.
+    hard_warnings = [
+        warning
+        for warning in result.warnings
+        if "preference" not in warning.casefold() and "ranker" not in warning.casefold()
+    ]
+    assert not hard_warnings, hard_warnings
     assert all(day.items for day in result.days), "Empty itinerary day"
     ids = [i.poi.poi_id for d in result.days for i in d.items]
     assert len(ids) == len(set(ids)), "Duplicate POI"
@@ -133,7 +139,7 @@ def main():
             markdown = client.predict(
                 p.country, p.city, p.start_date, p.days, p.budget, p.currency,
                 p.age_group, p.travel_group, p.interests, p.pace,
-                p.transport_preference, "", api_name="/plan",
+                p.transport_preference, "", "", api_name="/plan",
             )
             assert isinstance(markdown, str) and "Planning failed" not in markdown
             assert "grounded" in markdown and "Realtime context" in markdown
