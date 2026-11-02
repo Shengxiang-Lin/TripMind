@@ -1,4 +1,9 @@
-"""Build a public travel-preference corpus without LLM-generated labels."""
+"""Legacy/auxiliary public preference normalizer.
+
+The main TripMind small-model path is now `build_genup_preference_dataset.py`,
+which converts GenUP next-POI supervision into candidate-level preference data.
+This script is retained for optional experiments and backward compatibility.
+"""
 from __future__ import annotations
 
 import argparse
@@ -12,10 +17,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tripmind.config import get_config, resolve_project_path
-from tripmind.processing.preferences import (
-    iter_genup_records,
-    iter_stravl_records,
-)
+from tripmind.processing.preferences import iter_genup_records, iter_stravl_records
 
 GENUP_META = {
     "genup-nyc": (
@@ -42,22 +44,15 @@ def parse_args() -> argparse.Namespace:
         "--sources",
         nargs="+",
         choices=["stravl", *GENUP_META],
-        default=["stravl", *GENUP_META],
+        default=list(GENUP_META),
+        help="Defaults to GenUP only. Add `stravl` explicitly for auxiliary experiments.",
     )
-    parser.add_argument(
-        "--output",
-        default="data/processed/public_preferences",
-    )
+    parser.add_argument("--output", default="data/processed/public_preferences")
     parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
 
 
-def _write_stravl(
-    raw_dir: Path,
-    output: Path,
-    *,
-    seed: int,
-) -> dict:
+def _write_stravl(raw_dir: Path, output: Path, *, seed: int) -> dict:
     folder = raw_dir / "stravl"
     csv_path = folder / "Stravl_Travel_Preference_Data.csv"
     destinations = folder / "destination_ids.txt"
@@ -75,12 +70,9 @@ def _write_stravl(
             path = output / "explicit_destination" / f"{split}.jsonl"
             path.parent.mkdir(parents=True, exist_ok=True)
             streams[split] = path.open("w", encoding="utf-8")
-
         for record in iter_stravl_records(csv_path, destinations, seed=seed):
             split = record["split"]
-            streams[split].write(
-                json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n"
-            )
+            streams[split].write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
             counts[split] += 1
             users[split].add(record["user_key"])
     finally:
@@ -91,14 +83,13 @@ def _write_stravl(
         users["validation"] & users["test"]
     ):
         raise AssertionError("Stravl user leakage across splits")
-
     return {
         "task": "explicit_destination_preference",
         "records": sum(counts.values()),
         "splits": dict(counts),
         "users": {split: len(values) for split, values in users.items()},
-        "split_policy": "stable 80/10/10 hash by anonymized user",
         "label_source": "original Stravl yes/maybe/no swipes",
+        "status": "optional_auxiliary",
     }
 
 
@@ -110,39 +101,28 @@ def _write_genup(raw_dir: Path, output: Path, source: str) -> dict:
             f"{source} raw files are missing. Run "
             f"`python scripts/download_data.py --source {source}` first."
         )
-    paths = sorted(root.rglob("*.parquet"))
-    if not paths:
-        raise FileNotFoundError(f"No parquet files found under {root}")
-
     counts = Counter()
     output_dir = output / "next_poi"
     output_dir.mkdir(parents=True, exist_ok=True)
     streams = {}
     try:
-        for record in iter_genup_records(
-            root,
-            dataset_name=dataset_name,
-            source_url=source_url,
-        ):
+        for record in iter_genup_records(root, dataset_name=dataset_name, source_url=source_url):
             split = record["split"]
             if split not in streams:
-                streams[split] = (
-                    output_dir / f"{source}-{split}.jsonl"
-                ).open("w", encoding="utf-8")
-            streams[split].write(
-                json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n"
-            )
+                streams[split] = (output_dir / f"{source}-{split}.jsonl").open(
+                    "w", encoding="utf-8"
+                )
+            streams[split].write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
             counts[split] += 1
     finally:
         for stream in streams.values():
             stream.close()
-
     return {
         "task": "next_poi_prediction",
         "records": sum(counts.values()),
         "splits": dict(counts),
-        "split_policy": "preserve upstream Hugging Face split encoded by parquet path",
         "label_source": "original GenUP/LLM4POI next-POI target",
+        "status": "legacy_generation_format",
     }
 
 
@@ -156,18 +136,16 @@ def main() -> None:
     manifest = {
         "schema_version": 1,
         "seed": args.seed,
-        "strategy": (
-            "public supervision first; do not convert destination swipes and "
-            "next-POI trajectories into fabricated listwise rankings"
-        ),
+        "status": "auxiliary_legacy_normalizer",
+        "recommended_main_builder": "training/build_genup_preference_dataset.py",
         "sources": {},
     }
-
     for source in args.sources:
-        if source == "stravl":
-            summary = _write_stravl(raw_dir, output, seed=args.seed)
-        else:
-            summary = _write_genup(raw_dir, output, source)
+        summary = (
+            _write_stravl(raw_dir, output, seed=args.seed)
+            if source == "stravl"
+            else _write_genup(raw_dir, output, source)
+        )
         manifest["sources"][source] = summary
         print(source, summary)
 
@@ -175,7 +153,8 @@ def main() -> None:
         json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
         encoding="utf-8",
     )
-    print("Wrote public preference corpus to", output)
+    print("Wrote auxiliary public preference corpus to", output)
+    print("Main scorer builder: python training/build_genup_preference_dataset.py")
 
 
 if __name__ == "__main__":
