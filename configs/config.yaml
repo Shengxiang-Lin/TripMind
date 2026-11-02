@@ -28,17 +28,19 @@ realtime:
   poi_limit: 6
 
 training:
+  # Public supervision is the primary preference-learning source.
+  public_preferences:
+    seed: 42
+    output_dir: "data/processed/public_preferences"
+  # ChinaTravel listwise ranking is now a small task-alignment/calibration set,
+  # not the main source of thousands of paid teacher labels.
   ranking:
-    # Candidate POIs shown to the personalized ranking model.
     candidate_count: 8
-    # Static Wikivoyage chunks attached to each teacher/SFT instance.
     knowledge_top_k: 3
-    # Qwen teacher used only when --label-mode dashscope is requested.
     teacher_model: "qwen-plus"
-    # 0/null means all available examples; these caps target a course-scale SFT set.
-    train_limit: 4000
-    validation_limit: 400
-    test_limit: 400
+    train_limit: 300
+    validation_limit: 100
+    test_limit: 100
 
 data:
   use_processed: true
@@ -62,3 +64,19 @@ data:
       - en
     dump_filename: "{lang}wikivoyage-latest-pages-articles.xml.bz2"
     dump_url: "https://dumps.wikimedia.org/{lang}wikivoyage/latest/{filename}"
+
+  public_preferences:
+    stravl:
+      csv_url: "https://raw.githubusercontent.com/Stravl/Stravl-Data/main/Stravl_Travel_Preference_Data.csv"
+      destinations_url: "https://raw.githubusercontent.com/Stravl/Stravl-Data/main/destination_ids.txt"
+      source_url: "https://github.com/Stravl/Stravl-Data"
+    genup:
+      nyc:
+        repo_id: "w11wo/FourSquare-NYC-POI"
+        revision: "main"
+      tky:
+        repo_id: "w11wo/FourSquare-TKY-POI"
+        revision: "main"
+      ca:
+        repo_id: "w11wo/Gowalla-CA-POI"
+        revision: "main"

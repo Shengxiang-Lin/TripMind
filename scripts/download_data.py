@@ -15,7 +15,7 @@ if str(ROOT) not in sys.path:
 
 from tripmind.config import get_config, resolve_project_path
 
-HTTP_USER_AGENT = "TripMind/0.3 (+https://github.com/Shengxiang-Lin/TripMind)"
+HTTP_USER_AGENT = "TripMind/0.4 (+https://github.com/Shengxiang-Lin/TripMind)"
 
 
 def _download_hf(repo_id: str, revision: str, target: Path) -> None:
@@ -64,15 +64,53 @@ def _download_wikivoyage(
         _download_file(url, target, force=force)
 
 
+def _download_stravl(cfg: dict, raw_dir: Path, force: bool) -> None:
+    item = cfg["data"]["public_preferences"]["stravl"]
+    target = raw_dir / "stravl"
+    _download_file(
+        item["csv_url"],
+        target / "Stravl_Travel_Preference_Data.csv",
+        force=force,
+    )
+    _download_file(
+        item["destinations_url"],
+        target / "destination_ids.txt",
+        force=force,
+    )
+
+
+def _download_genup(cfg: dict, raw_dir: Path, source: str) -> None:
+    item = cfg["data"]["public_preferences"]["genup"][source]
+    _download_hf(
+        item["repo_id"],
+        item.get("revision", "main"),
+        raw_dir / f"genup-{source}",
+    )
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Download public datasets used by TripMind."
     )
     parser.add_argument(
         "--source",
-        choices=["all", "chinatravel", "chinatravel-sandbox", "wikivoyage"],
+        choices=[
+            "all",
+            "core",
+            "preferences",
+            "chinatravel",
+            "chinatravel-sandbox",
+            "wikivoyage",
+            "stravl",
+            "genup-nyc",
+            "genup-tky",
+            "genup-ca",
+        ],
         default="all",
-        help="Dataset source to download.",
+        help=(
+            "Dataset source/group. 'core' is ChinaTravel + Sandbox + Wikivoyage; "
+            "'preferences' is Stravl + GenUP NYC/Tokyo/California."
+        ),
     )
     parser.add_argument(
         "--languages",
@@ -83,7 +121,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Redownload existing Wikivoyage dump files.",
+        help="Redownload existing direct-HTTP files (Wikivoyage/Stravl).",
     )
     return parser.parse_args()
 
@@ -94,11 +132,16 @@ def main() -> None:
     raw_dir = resolve_project_path(cfg["data"].get("raw_dir", "data/raw"))
     raw_dir.mkdir(parents=True, exist_ok=True)
 
-    sources = (
-        {"chinatravel", "chinatravel-sandbox", "wikivoyage"}
-        if args.source == "all"
-        else {args.source}
-    )
+    core = {"chinatravel", "chinatravel-sandbox", "wikivoyage"}
+    preference = {"stravl", "genup-nyc", "genup-tky", "genup-ca"}
+    if args.source == "all":
+        sources = core | preference
+    elif args.source == "core":
+        sources = core
+    elif args.source == "preferences":
+        sources = preference
+    else:
+        sources = {args.source}
 
     if "chinatravel" in sources:
         item = cfg["data"]["chinatravel"]
@@ -123,6 +166,13 @@ def main() -> None:
             else cfg["data"]["wikivoyage"].get("languages", ["zh", "en"])
         )
         _download_wikivoyage(cfg, languages, raw_dir, force=args.force)
+
+    if "stravl" in sources:
+        _download_stravl(cfg, raw_dir, force=args.force)
+
+    for source in ("nyc", "tky", "ca"):
+        if f"genup-{source}" in sources:
+            _download_genup(cfg, raw_dir, source)
 
     print(f"\nRaw datasets are under: {raw_dir}")
     print("Downloaded raw data is gitignored by default.")

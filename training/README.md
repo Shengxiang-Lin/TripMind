@@ -1,25 +1,127 @@
-# Personalized POI Ranking Data
+# Preference Learning Data
 
-TripMind's final personalized model is intended to learn **which POIs fit a traveler**, not to memorize dynamic route times, weather, or current promotions.
+TripMind's small model is intended to learn **traveler preference**, not to memorize weather, realtime prices, road times, or temporary closures.
 
-The production data bundle already contains three useful ingredients:
+The preferred supervision strategy is now:
 
-- ChinaTravel requests and preference/constraint text in leakage-safe train/validation/test splits;
-- normalized attraction candidates from ChinaTravel-Sandbox;
-- city-filtered Wikivoyage retrieval results.
-
-ChinaTravel does **not** provide a ground-truth POI ranking for each request. Therefore `build_ranking_dataset.py` separates **instance construction** from **label creation** instead of silently treating heuristic scores as supervision.
-
-## 1. Build the production data bundle first
-
-```bash
-python scripts/download_data.py --source all --languages zh en
-python scripts/build_data.py
+```text
+Public preference data (main supervision)
+        +
+small ChinaTravel ranking calibration set
+        |
+        v
+preference-aware small model
+        |
+        v
+runtime RAG + realtime + routing + planner
 ```
 
-The ranking builder reads the active validated bundle under `data/processed/production/current.json`.
+This replaces the earlier idea of labeling thousands of ChinaTravel ranking instances with a paid Qwen teacher.
 
-## 2. Build unlabeled teacher-ready instances
+## 1. Public preference sources
+
+### Stravl
+
+Source: https://github.com/Stravl/Stravl-Data
+
+Stravl contains 80k+ traveler profiles and 1M+ destination swipes. Each user supplies travel preferences such as age ranges, budget, season, desired experiences, scenery, activity level, safety preference, popularity preference, and target region. Destinations receive original `Yes / Maybe / No` swipe labels.
+
+TripMind preserves these as the task:
+
+```text
+(profile, destination) -> yes / maybe / no
+```
+
+We do **not** invent a POI ranking from this dataset. User IDs are hashed again and all records from one user are assigned to the same deterministic 80/10/10 train/validation/test split.
+
+### GenUP / LLM4POI processed POI datasets
+
+Sources:
+
+- https://huggingface.co/datasets/w11wo/FourSquare-NYC-POI
+- https://huggingface.co/datasets/w11wo/FourSquare-TKY-POI
+- https://huggingface.co/datasets/w11wo/Gowalla-CA-POI
+
+These datasets contain user-profile / trajectory prompts with original next-POI targets. TripMind preserves the upstream supervision as:
+
+```text
+(user profile + check-in trajectory) -> next POI
+```
+
+The processed records already contain `system_prompt`, `inputs`, and `targets`; TripMind converts them into standard ChatML without changing the target semantics.
+
+## 2. Download
+
+Download only the public preference datasets:
+
+```bash
+python scripts/download_data.py --source preferences
+```
+
+Or individually:
+
+```bash
+python scripts/download_data.py --source stravl
+python scripts/download_data.py --source genup-nyc
+python scripts/download_data.py --source genup-tky
+python scripts/download_data.py --source genup-ca
+```
+
+The original travel-planning data can still be downloaded separately:
+
+```bash
+python scripts/download_data.py --source core --languages zh en
+```
+
+`--source all` downloads both core travel data and public preference data.
+
+## 3. Normalize the public preference corpus
+
+```bash
+python training/build_public_preference_dataset.py
+```
+
+Output:
+
+```text
+data/processed/public_preferences/
+├── explicit_destination/
+│   ├── train.jsonl
+│   ├── validation.jsonl
+│   └── test.jsonl
+├── next_poi/
+│   ├── genup-nyc-*.jsonl
+│   ├── genup-tky-*.jsonl
+│   └── genup-ca-*.jsonl
+└── manifest.json
+```
+
+Validate it with:
+
+```bash
+python evaluation/public_preferences.py \
+  --root data/processed/public_preferences
+```
+
+The validator checks duplicate record IDs, Stravl user leakage across splits, label validity, and GenUP ChatML structure.
+
+## 4. Why the tasks remain separate
+
+Stravl is **explicit destination preference** while GenUP is **implicit next-POI behavior**. They are related but not identical supervision signals.
+
+TripMind therefore does not coerce them into fabricated listwise ranking scores. A later multi-task trainer can use task-specific losses, for example:
+
+```text
+L = lambda_explicit * L_yes_maybe_no
+  + lambda_nextpoi * L_next_poi
+  + lambda_rank * L_chinatravel_rank
+```
+
+The public tasks should teach general preference/behavior patterns. ChinaTravel then provides a small target-domain alignment set for the final TripMind POI-ranking interface.
+
+## 5. ChinaTravel ranking becomes calibration, not bulk supervision
+
+The existing builder remains available:
 
 ```bash
 python training/build_ranking_dataset.py \
@@ -27,122 +129,47 @@ python training/build_ranking_dataset.py \
   --output data/processed/ranking
 ```
 
-Default target limits are controlled by `configs/config.yaml`:
+The default limits are now intentionally small:
 
 ```text
-train       <= 4000
-validation  <= 400
-test        <= 400
+train       <= 300
+validation  <= 100
+test        <= 100
 ```
 
-For each source request, the builder:
+These ranking instances combine:
 
-1. keeps the existing leakage-safe ChinaTravel split group;
-2. selects a deterministic, category-diverse set of POIs from the target city;
-3. retrieves static Wikivoyage context from the local production RAG index;
-4. creates a strict ranking prompt containing only request/profile text, POI facts and static knowledge.
+- ChinaTravel request / preference / constraints;
+- target-city attraction candidates from ChinaTravel-Sandbox;
+- city-filtered Wikivoyage static RAG.
 
-Dynamic facts are intentionally absent from the teacher prompt.
+`--label-mode heuristic` is still debug-only. If Qwen teacher labels are used, they should be restricted to a small calibration subset after the public-data pretraining stage rather than thousands of API calls.
 
-## 3. Smoke/debug labels
+Example:
 
 ```bash
 python training/build_ranking_dataset.py \
-  --label-mode heuristic \
+  --label-mode dashscope \
+  --splits train validation \
   --train-limit 100 \
-  --validation-limit 20 \
-  --test-limit 20 \
-  --output data/processed/ranking_debug
-
-python evaluation/ranking_dataset.py --root data/processed/ranking_debug
-```
-
-`heuristic_debug_only` labels exist only to test the SFT schema and pipeline. They should **not** be used as the final training target.
-
-## 4. Qwen teacher labeling
-
-Configure a DashScope key in `configs/config.local.yaml`, then start with a small batch:
-
-```bash
-python training/build_ranking_dataset.py \
-  --label-mode dashscope \
-  --teacher-model qwen-plus \
-  --splits train validation \
-  --train-limit 50 \
-  --validation-limit 20 \
+  --validation-limit 30 \
   --output data/processed/ranking_teacher
 ```
 
-The Qwen teacher is called **without web search**. It must rank every candidate exactly once and return strict JSON. Invalid outputs get one repair attempt and then go to `failures.jsonl` rather than being silently accepted.
-
-For an interrupted paid labeling run, use `--resume` to reuse already written sample IDs:
-
-```bash
-python training/build_ranking_dataset.py \
-  --label-mode dashscope \
-  --splits train validation \
-  --resume \
-  --output data/processed/ranking_teacher
-```
-
-Before scaling to thousands of samples, inspect a small labeled subset manually. The recommended final supervision workflow is:
+## 6. Recommended training stages
 
 ```text
-ChinaTravel request split
-        +
-city POI candidates
-        +
-Wikivoyage static RAG
-        |
-        v
-strong Qwen teacher
-        |
-        v
-schema / consistency filtering
-        |
-        v
-human spot checks
-        |
-        v
-SFT train / validation set
+Stage A: preference pretraining
+    Stravl explicit preference
+    + GenUP next-POI behavior
+
+Stage B: TripMind task alignment
+    small ChinaTravel listwise ranking set
+
+Stage C: evaluation
+    held-out public splits
+    + ChinaTravel held-out families
+    + profile-sensitivity / NDCG / pairwise metrics
 ```
 
-The official/held-out test families remain separated by the upstream ChinaTravel split logic. Do not merge train, validation and test JSONL files before training.
-
-## 5. Validate the generated dataset
-
-```bash
-python evaluation/ranking_dataset.py --root data/processed/ranking_teacher
-```
-
-The validator checks:
-
-- unique sample IDs;
-- valid ChatML role order;
-- every candidate ranked exactly once when a label exists;
-- no `split_group` overlap across train/validation/test.
-
-## Output schema
-
-Each row contains metadata plus ChatML messages:
-
-```json
-{
-  "sample_id": "...",
-  "split": "train",
-  "split_group": "...",
-  "source_record_id": "...",
-  "source_uid": "...",
-  "official_holdout": false,
-  "label_source": "dashscope:qwen-plus",
-  "candidate_poi_ids": ["..."],
-  "knowledge_doc_ids": ["..."],
-  "messages": [
-    {"role": "system", "content": "..."},
-    {"role": "user", "content": "..."},
-    {"role": "assistant", "content": "{\"ranking\":[...]}"}
-  ]
-}
-```
-
-This format is deliberately independent of realtime search and routing so that the personalized ranker learns a stable preference policy.
+Dynamic route times, weather, temporary promotions and realtime closures remain outside the training corpus. They are handled by ORS, Alibaba realtime search and the deterministic planner at runtime.
