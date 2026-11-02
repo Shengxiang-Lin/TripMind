@@ -15,7 +15,7 @@ if str(ROOT) not in sys.path:
 
 from tripmind.config import get_config, resolve_project_path
 
-HTTP_USER_AGENT = "TripMind/0.4 (+https://github.com/Shengxiang-Lin/TripMind)"
+HTTP_USER_AGENT = "TripMind/0.5 (+https://github.com/Shengxiang-Lin/TripMind)"
 
 
 def _download_hf(repo_id: str, revision: str, target: Path) -> None:
@@ -33,7 +33,6 @@ def _download_file(url: str, target: Path, force: bool = False) -> None:
     if target.exists() and not force:
         print(f"[skip] {target} already exists")
         return
-
     target.parent.mkdir(parents=True, exist_ok=True)
     temp = target.with_suffix(target.suffix + ".part")
     print(f"[HTTP] {url}")
@@ -48,35 +47,21 @@ def _download_file(url: str, target: Path, force: bool = False) -> None:
 
 
 def _download_wikivoyage(
-    cfg: dict,
-    languages: Iterable[str],
-    raw_dir: Path,
-    force: bool,
+    cfg: dict, languages: Iterable[str], raw_dir: Path, force: bool
 ) -> None:
     wiki_cfg = cfg["data"]["wikivoyage"]
-    filename_template = wiki_cfg["dump_filename"]
-    url_template = wiki_cfg["dump_url"]
-
     for lang in languages:
-        filename = filename_template.format(lang=lang)
-        url = url_template.format(lang=lang, filename=filename)
-        target = raw_dir / "wikivoyage" / lang / filename
-        _download_file(url, target, force=force)
+        filename = wiki_cfg["dump_filename"].format(lang=lang)
+        url = wiki_cfg["dump_url"].format(lang=lang, filename=filename)
+        _download_file(url, raw_dir / "wikivoyage" / lang / filename, force=force)
 
 
 def _download_stravl(cfg: dict, raw_dir: Path, force: bool) -> None:
+    """Optional legacy auxiliary dataset; not part of the default training route."""
     item = cfg["data"]["public_preferences"]["stravl"]
     target = raw_dir / "stravl"
-    _download_file(
-        item["csv_url"],
-        target / "Stravl_Travel_Preference_Data.csv",
-        force=force,
-    )
-    _download_file(
-        item["destinations_url"],
-        target / "destination_ids.txt",
-        force=force,
-    )
+    _download_file(item["csv_url"], target / "Stravl_Travel_Preference_Data.csv", force)
+    _download_file(item["destinations_url"], target / "destination_ids.txt", force)
 
 
 def _download_genup(cfg: dict, raw_dir: Path, source: str) -> None:
@@ -89,40 +74,31 @@ def _download_genup(cfg: dict, raw_dir: Path, source: str) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Download public datasets used by TripMind."
-    )
+    parser = argparse.ArgumentParser(description="Download public datasets used by TripMind.")
     parser.add_argument(
         "--source",
         choices=[
             "all",
             "core",
+            "genup",
             "preferences",
             "chinatravel",
             "chinatravel-sandbox",
             "wikivoyage",
-            "stravl",
             "genup-nyc",
             "genup-tky",
             "genup-ca",
+            "stravl",
         ],
         default="all",
         help=(
-            "Dataset source/group. 'core' is ChinaTravel + Sandbox + Wikivoyage; "
-            "'preferences' is Stravl + GenUP NYC/Tokyo/California."
+            "'core' = ChinaTravel + Sandbox + Wikivoyage; "
+            "'genup'/'preferences' = GenUP NYC/Tokyo/California. "
+            "Stravl is optional and must be requested explicitly."
         ),
     )
-    parser.add_argument(
-        "--languages",
-        nargs="+",
-        default=None,
-        help="Wikivoyage language codes, e.g. zh en ja fr.",
-    )
-    parser.add_argument(
-        "--force",
-        action="store_true",
-        help="Redownload existing direct-HTTP files (Wikivoyage/Stravl).",
-    )
+    parser.add_argument("--languages", nargs="+", default=None)
+    parser.add_argument("--force", action="store_true")
     return parser.parse_args()
 
 
@@ -133,43 +109,27 @@ def main() -> None:
     raw_dir.mkdir(parents=True, exist_ok=True)
 
     core = {"chinatravel", "chinatravel-sandbox", "wikivoyage"}
-    preference = {"stravl", "genup-nyc", "genup-tky", "genup-ca"}
+    genup = {"genup-nyc", "genup-tky", "genup-ca"}
     if args.source == "all":
-        sources = core | preference
+        sources = core | genup
     elif args.source == "core":
         sources = core
-    elif args.source == "preferences":
-        sources = preference
+    elif args.source in {"genup", "preferences"}:
+        sources = genup
     else:
         sources = {args.source}
 
     if "chinatravel" in sources:
         item = cfg["data"]["chinatravel"]
-        _download_hf(
-            item["repo_id"],
-            item.get("revision", "main"),
-            raw_dir / "chinatravel",
-        )
-
+        _download_hf(item["repo_id"], item.get("revision", "main"), raw_dir / "chinatravel")
     if "chinatravel-sandbox" in sources:
         item = cfg["data"]["chinatravel_sandbox"]
-        _download_hf(
-            item["repo_id"],
-            item.get("revision", "main"),
-            raw_dir / "chinatravel-sandbox",
-        )
-
+        _download_hf(item["repo_id"], item.get("revision", "main"), raw_dir / "chinatravel-sandbox")
     if "wikivoyage" in sources:
-        languages = (
-            args.languages
-            if args.languages
-            else cfg["data"]["wikivoyage"].get("languages", ["zh", "en"])
-        )
-        _download_wikivoyage(cfg, languages, raw_dir, force=args.force)
-
+        languages = args.languages or cfg["data"]["wikivoyage"].get("languages", ["zh", "en"])
+        _download_wikivoyage(cfg, languages, raw_dir, args.force)
     if "stravl" in sources:
-        _download_stravl(cfg, raw_dir, force=args.force)
-
+        _download_stravl(cfg, raw_dir, args.force)
     for source in ("nyc", "tky", "ca"):
         if f"genup-{source}" in sources:
             _download_genup(cfg, raw_dir, source)
