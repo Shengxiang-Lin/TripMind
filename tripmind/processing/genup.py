@@ -87,19 +87,27 @@ def effective_split(upstream_split: str, context_id: str, validation_fraction: f
     return "validation" if fraction < validation_fraction else "train"
 
 
-def collect_catalog_and_user_targets(
+def collect_catalog_and_user_observations(
     root: Path, dataset_name: str
 ) -> tuple[dict[str, dict[str, Any]], dict[str, set[str]]]:
+    """Collect POI metadata and every POI ever observed for each user.
+
+    A user's observed set includes both trajectory visits and original next-POI
+    targets across the downloaded dataset. Excluding this set from negative
+    sampling avoids treating a known positive interaction as a synthetic negative.
+    """
     observations: dict[str, Counter[tuple[str, str]]] = defaultdict(Counter)
-    user_targets: dict[str, set[str]] = defaultdict(set)
+    user_observed: dict[str, set[str]] = defaultdict(set)
     for row in iter_raw_rows(root):
         raw_user = parse_user_id(row["system_prompt"]) or stable_id(dataset_name, row["system_prompt"])[:16]
         user_key = stable_id(dataset_name, "user", raw_user)[:20]
         target = parse_target_poi_id(row["targets"])
         if target:
-            user_targets[user_key].add(target)
+            user_observed[user_key].add(target)
         for visit in parse_history_visits(row["inputs"]):
-            observations[visit["poi_id"]][(visit["category"], visit["category_id"])] += 1
+            poi_id = visit["poi_id"]
+            user_observed[user_key].add(poi_id)
+            observations[poi_id][(visit["category"], visit["category_id"])] += 1
 
     catalog: dict[str, dict[str, Any]] = {}
     for poi_id, counter in observations.items():
@@ -111,7 +119,7 @@ def collect_catalog_and_user_targets(
             "metadata_observations": sum(counter.values()),
             "majority_observations": majority,
         }
-    return catalog, user_targets
+    return catalog, user_observed
 
 
 def candidate_payload(poi_id: str, catalog: dict[str, dict[str, Any]]) -> dict[str, Any]:
@@ -123,7 +131,7 @@ def sample_negatives(
     context_id: str,
     positive_id: str,
     history_ids: set[str],
-    known_user_targets: set[str],
+    known_user_observed: set[str],
     catalog: dict[str, dict[str, Any]],
     count: int,
     hard_fraction: float,
@@ -133,14 +141,15 @@ def sample_negatives(
     if not 0 <= hard_fraction <= 1:
         raise ValueError("hard_negative_fraction must be in [0, 1]")
 
-    excluded = set(history_ids) | set(known_user_targets) | {positive_id}
+    excluded = set(history_ids) | set(known_user_observed) | {positive_id}
     all_pool = [poi_id for poi_id in sorted(catalog) if poi_id not in excluded]
     if len(all_pool) < count:
         return []
 
     positive_category = catalog.get(positive_id, {}).get("category_id")
     hard_pool = [
-        poi_id for poi_id in all_pool
+        poi_id
+        for poi_id in all_pool
         if positive_category and catalog.get(poi_id, {}).get("category_id") == positive_category
     ]
     rng = random.Random(int(stable_id("genup_negative", context_id)[:16], 16))
@@ -164,7 +173,7 @@ def iter_preference_contexts(
     hard_negative_fraction: float = 0.5,
     validation_fraction: float = 0.1,
 ) -> Iterable[dict[str, Any]]:
-    catalog, user_targets = collect_catalog_and_user_targets(root, dataset_name)
+    catalog, user_observed = collect_catalog_and_user_observations(root, dataset_name)
     for row in iter_raw_rows(root):
         positive_id = parse_target_poi_id(row["targets"])
         if not positive_id:
@@ -178,7 +187,7 @@ def iter_preference_contexts(
             context_id=context_id,
             positive_id=positive_id,
             history_ids=history_ids,
-            known_user_targets=user_targets.get(user_key, set()),
+            known_user_observed=user_observed.get(user_key, set()),
             catalog=catalog,
             count=negatives_per_positive,
             hard_fraction=hard_negative_fraction,
