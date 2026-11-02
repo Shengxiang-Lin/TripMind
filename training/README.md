@@ -1,175 +1,178 @@
-# Preference Learning Data
+# GenUP Preference Learning
 
-TripMind's small model is intended to learn **traveler preference**, not to memorize weather, realtime prices, road times, or temporary closures.
+TripMind now uses **GenUP as the primary supervision source for the small preference model**. The main training path no longer requires Stravl, bulk Qwen teacher labeling, or synthetic ChinaTravel ranking labels.
 
-The preferred supervision strategy is now:
+The small model learns one stable function:
 
 ```text
-Public preference data (main supervision)
+behavior-derived user profile
         +
-small ChinaTravel ranking calibration set
+historical POI trajectory
+        +
+candidate POI
         |
         v
-preference-aware small model
-        |
-        v
-runtime RAG + realtime + routing + planner
+personalized preference score
 ```
 
-This replaces the earlier idea of labeling thousands of ChinaTravel ranking instances with a paid Qwen teacher.
+At runtime TripMind applies this scorer to candidate POIs, then leaves weather, temporary closures, route time and itinerary feasibility to realtime tools, ORS and the deterministic planner.
 
-## 1. Public preference sources
+## 1. GenUP data
 
-### Stravl
+TripMind uses:
 
-Source: https://github.com/Stravl/Stravl-Data
+- `w11wo/FourSquare-NYC-POI`
+- `w11wo/FourSquare-TKY-POI`
+- `w11wo/Gowalla-CA-POI`
 
-Stravl contains 80k+ traveler profiles and 1M+ destination swipes. Each user supplies travel preferences such as age ranges, budget, season, desired experiences, scenery, activity level, safety preference, popularity preference, and target region. Destinations receive original `Yes / Maybe / No` swipe labels.
-
-TripMind preserves these as the task:
+The processed GenUP records expose:
 
 ```text
-(profile, destination) -> yes / maybe / no
+system_prompt -> behavior-derived natural-language user profile
+inputs        -> chronological historical POI trajectory
+targets       -> real next POI
 ```
 
-We do **not** invent a POI ranking from this dataset. User IDs are hashed again and all records from one user are assigned to the same deterministic 80/10/10 train/validation/test split.
-
-### GenUP / LLM4POI processed POI datasets
-
-Sources:
-
-- https://huggingface.co/datasets/w11wo/FourSquare-NYC-POI
-- https://huggingface.co/datasets/w11wo/FourSquare-TKY-POI
-- https://huggingface.co/datasets/w11wo/Gowalla-CA-POI
-
-These datasets contain user-profile / trajectory prompts with original next-POI targets. TripMind preserves the upstream supervision as:
-
-```text
-(user profile + check-in trajectory) -> next POI
-```
-
-The processed records already contain `system_prompt`, `inputs`, and `targets`; TripMind converts them into standard ChatML without changing the target semantics.
+The profile is behavior-derived by GenUP. Demographic/personality text should not be described as independently collected ground-truth demographics.
 
 ## 2. Download
 
-Download only the public preference datasets:
-
 ```bash
-python scripts/download_data.py --source preferences
+python scripts/download_data.py --source genup
 ```
 
-Or individually:
+`--source preferences` is retained as a backward-compatible alias for the same GenUP group.
+
+Individual domains:
 
 ```bash
-python scripts/download_data.py --source stravl
 python scripts/download_data.py --source genup-nyc
 python scripts/download_data.py --source genup-tky
 python scripts/download_data.py --source genup-ca
 ```
 
-The original travel-planning data can still be downloaded separately:
+`--source all` downloads the core TripMind travel data plus GenUP. Stravl is no longer part of the default path; it is optional only.
+
+## 3. Build scorer supervision
 
 ```bash
-python scripts/download_data.py --source core --languages zh en
-```
-
-`--source all` downloads both core travel data and public preference data.
-
-## 3. Normalize the public preference corpus
-
-```bash
-python training/build_public_preference_dataset.py
+python training/build_genup_preference_dataset.py
 ```
 
 Output:
 
 ```text
-data/processed/public_preferences/
-├── explicit_destination/
-│   ├── train.jsonl
-│   ├── validation.jsonl
-│   └── test.jsonl
-├── next_poi/
-│   ├── genup-nyc-*.jsonl
-│   ├── genup-tky-*.jsonl
-│   └── genup-ca-*.jsonl
+data/processed/genup_preference/
+├── nyc-train.jsonl
+├── nyc-validation.jsonl
+├── nyc-test.jsonl
+├── tky-train.jsonl
+├── tky-validation.jsonl
+├── tky-test.jsonl
+├── ca-train.jsonl
+├── ca-validation.jsonl
+├── ca-test.jsonl
 └── manifest.json
 ```
 
-Validate it with:
+GenUP exposes train/test splits. TripMind preserves upstream test and deterministically carves 10% of upstream train into validation.
 
-```bash
-python evaluation/public_preferences.py \
-  --root data/processed/public_preferences
-```
+## 4. How each context is built
 
-The validator checks duplicate record IDs, Stravl user leakage across splits, label validity, and GenUP ChatML structure.
+For every GenUP row:
 
-## 4. Why the tasks remain separate
-
-Stravl is **explicit destination preference** while GenUP is **implicit next-POI behavior**. They are related but not identical supervision signals.
-
-TripMind therefore does not coerce them into fabricated listwise ranking scores. A later multi-task trainer can use task-specific losses, for example:
-
-```text
-L = lambda_explicit * L_yes_maybe_no
-  + lambda_nextpoi * L_next_poi
-  + lambda_rank * L_chinatravel_rank
-```
-
-The public tasks should teach general preference/behavior patterns. ChinaTravel then provides a small target-domain alignment set for the final TripMind POI-ranking interface.
-
-## 5. ChinaTravel ranking becomes calibration, not bulk supervision
-
-The existing builder remains available:
-
-```bash
-python training/build_ranking_dataset.py \
-  --label-mode none \
-  --output data/processed/ranking
-```
-
-The default limits are now intentionally small:
-
-```text
-train       <= 300
-validation  <= 100
-test        <= 100
-```
-
-These ranking instances combine:
-
-- ChinaTravel request / preference / constraints;
-- target-city attraction candidates from ChinaTravel-Sandbox;
-- city-filtered Wikivoyage static RAG.
-
-`--label-mode heuristic` is still debug-only. If Qwen teacher labels are used, they should be restricted to a small calibration subset after the public-data pretraining stage rather than thousands of API calls.
+1. `system_prompt` is kept as `profile_text`.
+2. `inputs` is kept as `history_text` and parsed for historical POI/category IDs.
+3. The original `targets` next POI is the **positive candidate**.
+4. Historical POIs are never sampled as negatives.
+5. Any POI known to be a target for the same user elsewhere in the downloaded GenUP data is also excluded from negatives, reducing false-negative noise.
+6. By default four negatives are sampled: approximately half same-category hard negatives when category metadata is available, and half random unobserved POIs.
 
 Example:
 
-```bash
-python training/build_ranking_dataset.py \
-  --label-mode dashscope \
-  --splits train validation \
-  --train-limit 100 \
-  --validation-limit 30 \
-  --output data/processed/ranking_teacher
+```json
+{
+  "task": "candidate_poi_preference",
+  "profile_text": "You are user ... preferences ...",
+  "history_text": "... visited POI id ...",
+  "positive_candidate": {
+    "poi_id": "142",
+    "category": "Japanese Restaurant"
+  },
+  "negative_candidates": [
+    {"poi_id": "...", "negative_type": "same_category_hard"},
+    {"poi_id": "...", "negative_type": "random"}
+  ]
+}
 ```
 
-## 6. Recommended training stages
+No LLM API is called during this build.
+
+## 5. Intended model objective
+
+The preferred model interface is:
 
 ```text
-Stage A: preference pretraining
-    Stravl explicit preference
-    + GenUP next-POI behavior
-
-Stage B: TripMind task alignment
-    small ChinaTravel listwise ranking set
-
-Stage C: evaluation
-    held-out public splits
-    + ChinaTravel held-out families
-    + profile-sensitivity / NDCG / pairwise metrics
+s_theta(profile, history, candidate) -> scalar preference score
 ```
 
-Dynamic route times, weather, temporary promotions and realtime closures remain outside the training corpus. They are handled by ORS, Alibaba realtime search and the deterministic planner at runtime.
+For every real next POI `p+` and sampled negative `p-`, use pairwise ranking loss:
+
+```text
+L_pair = -log sigmoid(s(profile, history, p+) - s(profile, history, p-))
+```
+
+A listwise softmax over one positive plus N negatives is also compatible. The model should learn **relative user-specific POI preference**, not an arbitrary 0-100 teacher score.
+
+Runtime mapping:
+
+```text
+candidate POIs
+    |
+    +--> scorer(user, history, POI_1)
+    +--> scorer(user, history, POI_2)
+    +--> ...
+    |
+    v
+personalized Top-K
+    |
+    v
+realtime -> routing -> constraint planner
+```
+
+## 6. Validate
+
+```bash
+python evaluation/genup_preference.py \
+  --root data/processed/genup_preference
+```
+
+The validator checks unique contexts, one original positive per context, negative counts, duplicate/invalid negatives, history leakage into negatives, and agreement with the original GenUP target.
+
+## 7. Controls
+
+Defaults live in `configs/config.yaml`:
+
+```yaml
+training:
+  preference:
+    sources: [nyc, tky, ca]
+    validation_fraction: 0.10
+    negatives_per_positive: 4
+    hard_negative_fraction: 0.50
+```
+
+Override example:
+
+```bash
+python training/build_genup_preference_dataset.py \
+  --sources nyc tky \
+  --negatives-per-positive 6 \
+  --hard-negative-fraction 0.5
+```
+
+## 8. What is no longer on the main path
+
+`build_public_preference_dataset.py` and Stravl remain only for optional auxiliary experiments. `build_ranking_dataset.py` remains a research/debug utility, but paid Qwen teacher ranking is **not required** for the main TripMind preference model.
+
+ChinaTravel / ChinaTravel-Sandbox still serve the planning side: realistic travel requests, structured destination data and itinerary evaluation. Wikivoyage remains static RAG. They do not need to manufacture preference labels for the small model.
