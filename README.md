@@ -535,13 +535,13 @@ data/knowledge/
 
 ## Small end-to-end validation on downloaded data
 
-Use the existing `orchestra-o1` environment on the server. For a new environment,
-`requirements-runtime.txt` contains the minimal app/data dependencies; the larger
-`requirements.txt` is an environment snapshot.
+Use the existing `tripmind` environment on the server.
+`requirements.txt` contains the application, data-processing and teacher-labeling
+dependencies tested together in this environment.
 
 ```bash
-conda activate orchestra-o1
-python -m pip install -r requirements-runtime.txt
+conda activate tripmind
+python -m pip install -r requirements.txt
 
 # Environment variables have priority over local YAML. Remove an inherited stale
 # key to use the key already provided in configs/config.local.yaml.
@@ -599,11 +599,11 @@ Server compatibility notes:
 ## Full offline data pipeline
 
 The full pipeline replaces the small Hangzhou-only extraction with a versioned
-bundle. Use the server's `orchestra-o1` environment:
+bundle. Use the server's `tripmind` environment:
 
 ```bash
-conda activate orchestra-o1
-python -m pip install -r requirements-data.txt
+conda activate tripmind
+python -m pip install -r requirements.txt
 python scripts/build_data.py
 ```
 
