@@ -15,6 +15,7 @@ class UserProfile:
     pace: str = "relaxed"
     transport_preference: str = "walking"
     special_preferences: List[str] = field(default_factory=list)
+    travel_history: List[str] = field(default_factory=list)
     country: str = "China"
     start_date: Optional[str] = None
     currency: str = "CNY"
@@ -114,3 +115,4 @@ class Itinerary:
     warnings: List[str] = field(default_factory=list)
     realtime_status: str = "disabled"
     knowledge_sources: List[dict] = field(default_factory=list)
+    personalization_status: str = "heuristic"

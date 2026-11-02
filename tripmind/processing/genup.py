@@ -1,4 +1,4 @@
-"""GenUP adapters for candidate-level preference learning."""
+"""GenUP adapters for transferable candidate-level preference learning."""
 from __future__ import annotations
 
 import random
@@ -78,7 +78,11 @@ def context_identity(dataset_name: str, row: dict[str, str]) -> str:
     )[:24]
 
 
-def effective_split(upstream_split: str, context_id: str, validation_fraction: float = 0.1) -> str:
+def effective_split(
+    upstream_split: str,
+    context_id: str,
+    validation_fraction: float = 0.1,
+) -> str:
     if not 0 <= validation_fraction < 1:
         raise ValueError("validation_fraction must be in [0, 1)")
     if upstream_split in {"validation", "test"}:
@@ -87,27 +91,26 @@ def effective_split(upstream_split: str, context_id: str, validation_fraction: f
     return "validation" if fraction < validation_fraction else "train"
 
 
-def collect_catalog_and_user_observations(
-    root: Path, dataset_name: str
+def collect_catalog_and_user_observed(
+    root: Path,
+    dataset_name: str,
 ) -> tuple[dict[str, dict[str, Any]], dict[str, set[str]]]:
-    """Collect POI metadata and every POI ever observed for each user.
-
-    A user's observed set includes both trajectory visits and original next-POI
-    targets across the downloaded dataset. Excluding this set from negative
-    sampling avoids treating a known positive interaction as a synthetic negative.
-    """
     observations: dict[str, Counter[tuple[str, str]]] = defaultdict(Counter)
     user_observed: dict[str, set[str]] = defaultdict(set)
+
     for row in iter_raw_rows(root):
-        raw_user = parse_user_id(row["system_prompt"]) or stable_id(dataset_name, row["system_prompt"])[:16]
+        raw_user = parse_user_id(row["system_prompt"]) or stable_id(
+            dataset_name, row["system_prompt"]
+        )[:16]
         user_key = stable_id(dataset_name, "user", raw_user)[:20]
         target = parse_target_poi_id(row["targets"])
         if target:
             user_observed[user_key].add(target)
         for visit in parse_history_visits(row["inputs"]):
-            poi_id = visit["poi_id"]
-            user_observed[user_key].add(poi_id)
-            observations[poi_id][(visit["category"], visit["category_id"])] += 1
+            user_observed[user_key].add(visit["poi_id"])
+            observations[visit["poi_id"]][
+                (visit["category"], visit["category_id"])
+            ] += 1
 
     catalog: dict[str, dict[str, Any]] = {}
     for poi_id, counter in observations.items():
@@ -122,45 +125,71 @@ def collect_catalog_and_user_observations(
     return catalog, user_observed
 
 
-def candidate_payload(poi_id: str, catalog: dict[str, dict[str, Any]]) -> dict[str, Any]:
-    return dict(catalog.get(poi_id, {"poi_id": poi_id, "category": None, "category_id": None}))
+def candidate_payload(
+    poi_id: str,
+    catalog: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    return dict(
+        catalog.get(
+            poi_id,
+            {"poi_id": poi_id, "category": None, "category_id": None},
+        )
+    )
 
 
 def sample_negatives(
     *,
     context_id: str,
     positive_id: str,
-    history_ids: set[str],
     known_user_observed: set[str],
     catalog: dict[str, dict[str, Any]],
     count: int,
-    hard_fraction: float,
+    same_category_fraction: float,
 ) -> list[tuple[str, str]]:
     if count < 1:
         raise ValueError("negatives_per_positive must be at least 1")
-    if not 0 <= hard_fraction <= 1:
-        raise ValueError("hard_negative_fraction must be in [0, 1]")
+    if not 0 <= same_category_fraction <= 1:
+        raise ValueError("same_category_fraction must be in [0, 1]")
 
-    excluded = set(history_ids) | set(known_user_observed) | {positive_id}
-    all_pool = [poi_id for poi_id in sorted(catalog) if poi_id not in excluded]
+    positive_category = catalog.get(positive_id, {}).get("category_id")
+    excluded = set(known_user_observed) | {positive_id}
+    all_pool = [
+        poi_id
+        for poi_id in sorted(catalog)
+        if poi_id not in excluded and catalog.get(poi_id, {}).get("category")
+    ]
     if len(all_pool) < count:
         return []
 
-    positive_category = catalog.get(positive_id, {}).get("category_id")
-    hard_pool = [
+    rng = random.Random(int(stable_id("genup_negative", context_id)[:16], 16))
+    same_category = [
         poi_id
         for poi_id in all_pool
-        if positive_category and catalog.get(poi_id, {}).get("category_id") == positive_category
+        if positive_category
+        and catalog.get(poi_id, {}).get("category_id") == positive_category
     ]
-    rng = random.Random(int(stable_id("genup_negative", context_id)[:16], 16))
-    rng.shuffle(hard_pool)
-    desired_hard = min(count, round(count * hard_fraction))
-    chosen = [(poi_id, "same_category_hard") for poi_id in hard_pool[:desired_hard]]
+    rng.shuffle(same_category)
+    desired_same = min(count, round(count * same_category_fraction))
+    chosen = [
+        (poi_id, "same_category")
+        for poi_id in same_category[:desired_same]
+    ]
     chosen_ids = {poi_id for poi_id, _ in chosen}
 
-    random_pool = [poi_id for poi_id in all_pool if poi_id not in chosen_ids]
-    rng.shuffle(random_pool)
-    chosen.extend((poi_id, "random") for poi_id in random_pool[: count - len(chosen)])
+    different_category = [
+        poi_id
+        for poi_id in all_pool
+        if poi_id not in chosen_ids
+        and (
+            not positive_category
+            or catalog.get(poi_id, {}).get("category_id") != positive_category
+        )
+    ]
+    rng.shuffle(different_category)
+    chosen.extend(
+        (poi_id, "random_unobserved_different_category")
+        for poi_id in different_category[: count - len(chosen)]
+    )
     return chosen if len(chosen) == count else []
 
 
@@ -170,49 +199,64 @@ def iter_preference_contexts(
     dataset_name: str,
     source_url: str,
     negatives_per_positive: int = 4,
-    hard_negative_fraction: float = 0.5,
+    hard_negative_fraction: float = 0.0,
     validation_fraction: float = 0.1,
 ) -> Iterable[dict[str, Any]]:
-    catalog, user_observed = collect_catalog_and_user_observations(root, dataset_name)
+    catalog, user_observed = collect_catalog_and_user_observed(root, dataset_name)
+
     for row in iter_raw_rows(root):
         positive_id = parse_target_poi_id(row["targets"])
         if not positive_id:
             continue
+        positive_payload = candidate_payload(positive_id, catalog)
+        if not positive_payload.get("category"):
+            continue
+
         context_id = context_identity(dataset_name, row)
-        raw_user = parse_user_id(row["system_prompt"]) or stable_id(dataset_name, row["system_prompt"])[:16]
+        raw_user = parse_user_id(row["system_prompt"]) or stable_id(
+            dataset_name, row["system_prompt"]
+        )[:16]
         user_key = stable_id(dataset_name, "user", raw_user)[:20]
         visits = parse_history_visits(row["inputs"])
-        history_ids = {visit["poi_id"] for visit in visits}
         negatives = sample_negatives(
             context_id=context_id,
             positive_id=positive_id,
-            history_ids=history_ids,
             known_user_observed=user_observed.get(user_key, set()),
             catalog=catalog,
             count=negatives_per_positive,
-            hard_fraction=hard_negative_fraction,
+            same_category_fraction=hard_negative_fraction,
         )
         if len(negatives) != negatives_per_positive:
             continue
+
         negative_payloads = []
         for poi_id, kind in negatives:
             payload = candidate_payload(poi_id, catalog)
             payload["negative_type"] = kind
             negative_payloads.append(payload)
+
         yield {
-            "schema_version": 1,
+            "schema_version": 2,
             "task": "candidate_poi_preference",
             "source_dataset": dataset_name,
             "source_url": source_url,
             "context_id": context_id,
             "upstream_split": row["upstream_split"],
-            "split": effective_split(row["upstream_split"], context_id, validation_fraction),
+            "split": effective_split(
+                row["upstream_split"],
+                context_id,
+                validation_fraction,
+            ),
             "user_key": user_key,
             "profile_text": row["system_prompt"],
             "history_text": row["inputs"],
             "history_poi_ids": [visit["poi_id"] for visit in visits],
-            "positive_candidate": candidate_payload(positive_id, catalog),
+            "history_categories": [visit["category"] for visit in visits],
+            "positive_candidate": positive_payload,
             "negative_candidates": negative_payloads,
             "target_text": row["targets"],
-            "supervision": "original_next_poi_positive_with_sampled_unobserved_negatives",
+            "supervision": (
+                "original_next_poi_positive_with_sampled_globally_unobserved_negatives"
+            ),
+            "prompt_policy": "omit_dataset_local_poi_ids_use_semantic_categories",
         }

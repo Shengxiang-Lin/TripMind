@@ -1,178 +1,47 @@
-# GenUP Preference Learning
+# TripMind GenUP Preference Model
 
-TripMind now uses **GenUP as the primary supervision source for the small preference model**. The main training path no longer requires Stravl, bulk Qwen teacher labeling, or synthetic ChinaTravel ranking labels.
+Main task: `score(profile, history, candidate)` with a Qwen backbone plus scalar head. The real GenUP next POI is positive; POIs never observed for that user are negatives. Dataset-local POI IDs are not included in model prompts, so the scorer learns transferable profile/history/category preference rather than memorizing NYC/Tokyo/California IDs.
 
-The small model learns one stable function:
-
-```text
-behavior-derived user profile
-        +
-historical POI trajectory
-        +
-candidate POI
-        |
-        v
-personalized preference score
-```
-
-At runtime TripMind applies this scorer to candidate POIs, then leaves weather, temporary closures, route time and itinerary feasibility to realtime tools, ORS and the deterministic planner.
-
-## 1. GenUP data
-
-TripMind uses:
-
-- `w11wo/FourSquare-NYC-POI`
-- `w11wo/FourSquare-TKY-POI`
-- `w11wo/Gowalla-CA-POI`
-
-The processed GenUP records expose:
-
-```text
-system_prompt -> behavior-derived natural-language user profile
-inputs        -> chronological historical POI trajectory
-targets       -> real next POI
-```
-
-The profile is behavior-derived by GenUP. Demographic/personality text should not be described as independently collected ground-truth demographics.
-
-## 2. Download
+## Server commands
 
 ```bash
+conda activate tripmind
+python -m pip install -r requirements-training.txt
 python scripts/download_data.py --source genup
-```
-
-`--source preferences` is retained as a backward-compatible alias for the same GenUP group.
-
-Individual domains:
-
-```bash
-python scripts/download_data.py --source genup-nyc
-python scripts/download_data.py --source genup-tky
-python scripts/download_data.py --source genup-ca
-```
-
-`--source all` downloads the core TripMind travel data plus GenUP. Stravl is no longer part of the default path; it is optional only.
-
-## 3. Build scorer supervision
-
-```bash
 python training/build_genup_preference_dataset.py
+python evaluation/genup_preference.py --root data/processed/genup_preference
+python evaluation/genup_preference_fixture.py
+python evaluation/preference_ranker_smoke.py
 ```
 
-Output:
-
-```text
-data/processed/genup_preference/
-├── nyc-train.jsonl
-├── nyc-validation.jsonl
-├── nyc-test.jsonl
-├── tky-train.jsonl
-├── tky-validation.jsonl
-├── tky-test.jsonl
-├── ca-train.jsonl
-├── ca-validation.jsonl
-├── ca-test.jsonl
-└── manifest.json
-```
-
-GenUP exposes train/test splits. TripMind preserves upstream test and deterministically carves 10% of upstream train into validation.
-
-## 4. How each context is built
-
-For every GenUP row:
-
-1. `system_prompt` is kept as `profile_text`.
-2. `inputs` is kept as `history_text` and parsed for historical POI/category IDs.
-3. The original `targets` next POI is the **positive candidate**.
-4. Historical POIs are never sampled as negatives.
-5. Any POI known to be a target for the same user elsewhere in the downloaded GenUP data is also excluded from negatives, reducing false-negative noise.
-6. By default four negatives are sampled: approximately half same-category hard negatives when category metadata is available, and half random unobserved POIs.
-
-Example:
-
-```json
-{
-  "task": "candidate_poi_preference",
-  "profile_text": "You are user ... preferences ...",
-  "history_text": "... visited POI id ...",
-  "positive_candidate": {
-    "poi_id": "142",
-    "category": "Japanese Restaurant"
-  },
-  "negative_candidates": [
-    {"poi_id": "...", "negative_type": "same_category_hard"},
-    {"poi_id": "...", "negative_type": "random"}
-  ]
-}
-```
-
-No LLM API is called during this build.
-
-## 5. Intended model objective
-
-The preferred model interface is:
-
-```text
-s_theta(profile, history, candidate) -> scalar preference score
-```
-
-For every real next POI `p+` and sampled negative `p-`, use pairwise ranking loss:
-
-```text
-L_pair = -log sigmoid(s(profile, history, p+) - s(profile, history, p-))
-```
-
-A listwise softmax over one positive plus N negatives is also compatible. The model should learn **relative user-specific POI preference**, not an arbitrary 0-100 teacher score.
-
-Runtime mapping:
-
-```text
-candidate POIs
-    |
-    +--> scorer(user, history, POI_1)
-    +--> scorer(user, history, POI_2)
-    +--> ...
-    |
-    v
-personalized Top-K
-    |
-    v
-realtime -> routing -> constraint planner
-```
-
-## 6. Validate
+Small training first:
 
 ```bash
-python evaluation/genup_preference.py \
-  --root data/processed/genup_preference
+python training/train_preference_model.py --max-train-contexts 1000 --max-validation-contexts 300 --epochs 1 --output checkpoints/tripmind-preference-smoke
+python evaluation/evaluate_preference_model.py --checkpoint checkpoints/tripmind-preference-smoke/best --split test --max-contexts 300
 ```
 
-The validator checks unique contexts, one original positive per context, negative counts, duplicate/invalid negatives, history leakage into negatives, and agreement with the original GenUP target.
-
-## 7. Controls
-
-Defaults live in `configs/config.yaml`:
-
-```yaml
-training:
-  preference:
-    sources: [nyc, tky, ca]
-    validation_fraction: 0.10
-    negatives_per_positive: 4
-    hard_negative_fraction: 0.50
-```
-
-Override example:
+Full training:
 
 ```bash
-python training/build_genup_preference_dataset.py \
-  --sources nyc tky \
-  --negatives-per-positive 6 \
-  --hard-negative-fraction 0.5
+python training/train_preference_model.py
+python evaluation/evaluate_preference_model.py --checkpoint checkpoints/tripmind-preference/best --split test --output data/processed/genup_preference/test_metrics.json
+python evaluation/evaluate_preference_model.py --checkpoint checkpoints/tripmind-preference/best --split test --no-history --max-contexts 1000
+python evaluation/evaluate_preference_model.py --checkpoint checkpoints/tripmind-preference/best --split test --no-profile --max-contexts 1000
+python evaluation/preference_service_smoke.py --checkpoint checkpoints/tripmind-preference/best
+python app.py
 ```
 
-## 8. What is no longer on the main path
+Default base model is `Qwen/Qwen2.5-0.5B-Instruct`. Training uses pairwise `softplus(score_negative-score_positive)`. Twenty-five percent of training pairs mask history for cold-start robustness. The checkpoint selected as `best/` maximizes validation pairwise accuracy.
 
-`build_public_preference_dataset.py` and Stravl remain only for optional auxiliary experiments. `build_ranking_dataset.py` remains a research/debug utility, but paid Qwen teacher ranking is **not required** for the main TripMind preference model.
+Runtime uses `providers.preference: auto`: a valid checkpoint activates `learned-genup`; otherwise TripMind stays on the heuristic baseline. Pairwise logits are not probabilities. For the existing planner/realtime scale, logits are z-scored within the candidate set and passed through sigmoid. A 15% heuristic blend is retained by default because GenUP does not directly supervise TripMind ticket budget, pace, or travel-group constraints.
 
-ChinaTravel / ChinaTravel-Sandbox still serve the planning side: realistic travel requests, structured destination data and itinerary evaluation. Wikivoyage remains static RAG. They do not need to manufacture preference labels for the small model.
+Responsibility boundary:
+
+```text
+GenUP scorer -> long-term personalized POI preference
+Wikivoyage   -> stable travel knowledge
+Realtime     -> changing external context
+ORS          -> road distance/time
+Planner      -> budget/time/hours/route feasibility
+```

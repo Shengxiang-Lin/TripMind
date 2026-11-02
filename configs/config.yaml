@@ -3,10 +3,9 @@ project:
   mode: local
 
 providers:
-  # auto | local | ors
   route: auto
-  # auto | local | dashscope
   realtime: auto
+  preference: auto
 
 dashscope:
   api_key: ""
@@ -14,29 +13,41 @@ dashscope:
   model: "qwen-plus"
   realtime_model: "qwen-plus"
   search_strategy: "turbo"
-
 ors:
   api_key: ""
   base_url: "https://api.heigit.org/openrouteservice"
   timeout_seconds: 15
-
 realtime:
   ttl_seconds: 3600
   poi_limit: 6
-
+preference_model:
+  checkpoint: "checkpoints/tripmind-preference/best"
+  device: "auto"
+  inference_batch_size: 8
+  max_length: null
+  history_char_limit: null
+  heuristic_blend: 0.15
 training:
-  # Main small-model supervision: GenUP profile + visit history + real next POI.
   preference:
-    sources:
-      - nyc
-      - tky
-      - ca
+    sources: [nyc, tky, ca]
     output_dir: "data/processed/genup_preference"
+    checkpoint_dir: "checkpoints/tripmind-preference"
+    base_model: "Qwen/Qwen2.5-0.5B-Instruct"
+    seed: 42
     validation_fraction: 0.10
     negatives_per_positive: 4
-    hard_negative_fraction: 0.50
-
-  # Optional research/debug utility only; not required for the main model.
+    hard_negative_fraction: 0.0
+    max_length: 1024
+    history_char_limit: 6000
+    history_dropout: 0.25
+    epochs: 2
+    batch_size: 2
+    gradient_accumulation_steps: 8
+    learning_rate: 0.00002
+    weight_decay: 0.01
+    warmup_ratio: 0.05
+    max_grad_norm: 1.0
+    gradient_checkpointing: true
   ranking:
     candidate_count: 8
     knowledge_top_k: 3
@@ -44,7 +55,6 @@ training:
     train_limit: 100
     validation_limit: 30
     test_limit: 100
-
 data:
   use_processed: true
   bundle_root: "data/processed/production"
@@ -52,22 +62,16 @@ data:
   knowledge_file: "data/knowledge/travel_knowledge.json"
   raw_dir: "data/raw"
   processed_dir: "data/processed"
-
   chinatravel:
     repo_id: "LAMDA-NeSy/ChinaTravel"
     revision: "main"
-
   chinatravel_sandbox:
     repo_id: "LAMDA-NeSy/ChinaTravel-Sandbox"
     revision: "main"
-
   wikivoyage:
-    languages:
-      - zh
-      - en
+    languages: [zh, en]
     dump_filename: "{lang}wikivoyage-latest-pages-articles.xml.bz2"
     dump_url: "https://dumps.wikimedia.org/{lang}wikivoyage/latest/{filename}"
-
   public_preferences:
     genup:
       nyc:
@@ -79,7 +83,6 @@ data:
       ca:
         repo_id: "w11wo/Gowalla-CA-POI"
         revision: "main"
-    # Optional auxiliary dataset, not downloaded by --source all/genup.
     stravl:
       csv_url: "https://raw.githubusercontent.com/Stravl/Stravl-Data/main/Stravl_Travel_Preference_Data.csv"
       destinations_url: "https://raw.githubusercontent.com/Stravl/Stravl-Data/main/destination_ids.txt"
