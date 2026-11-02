@@ -28,12 +28,19 @@ from tripmind.preference_model import (
 from tripmind.preference_prompt import build_record_prompt
 from tripmind.processing.common import stable_id
 
+TRAINING_STATE_FILE = "training_state.pt"
+
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Train TripMind's GenUP preference scorer.")
+    parser = argparse.ArgumentParser(description="Train TripMind's GenUP category-preference scorer.")
     parser.add_argument("--data-root", default=None)
     parser.add_argument("--model", default=None)
     parser.add_argument("--output", default=None)
+    parser.add_argument(
+        "--resume-from",
+        default=None,
+        help="Resume from a saved training checkpoint, e.g. checkpoints/tripmind-preference/last.",
+    )
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument("--gradient-accumulation-steps", type=int, default=None)
@@ -235,11 +242,69 @@ def evaluate(
         "contexts": float(contexts),
         "pairs": float(pairs),
         "pairwise_accuracy": wins / pairs if pairs else 0.0,
-        "hit_at_1": hits / contexts if contexts else 0.0,
-        "mrr": rr / contexts if contexts else 0.0,
-        "ndcg": ndcg / contexts if contexts else 0.0,
+        "sampled_hit_at_1": hits / contexts if contexts else 0.0,
+        "sampled_mrr": rr / contexts if contexts else 0.0,
+        "sampled_ndcg": ndcg / contexts if contexts else 0.0,
         "average_positive_rank": avg_rank / contexts if contexts else 0.0,
     }
+
+
+def _torch_load(path: Path):
+    try:
+        return torch.load(path, map_location="cpu", weights_only=False)
+    except TypeError:
+        return torch.load(path, map_location="cpu")
+
+
+def _move_optimizer_state(optimizer: torch.optim.Optimizer, device: torch.device) -> None:
+    for state in optimizer.state.values():
+        for key, value in list(state.items()):
+            if torch.is_tensor(value):
+                state[key] = value.to(device)
+
+
+def _capture_rng_state() -> dict[str, Any]:
+    state: dict[str, Any] = {
+        "python_random_state": random.getstate(),
+        "torch_rng_state": torch.get_rng_state(),
+    }
+    if torch.cuda.is_available():
+        state["cuda_rng_state_all"] = torch.cuda.get_rng_state_all()
+    return state
+
+
+def _restore_rng_state(state: dict[str, Any]) -> None:
+    if state.get("python_random_state") is not None:
+        random.setstate(state["python_random_state"])
+    if state.get("torch_rng_state") is not None:
+        torch.set_rng_state(state["torch_rng_state"])
+    if torch.cuda.is_available() and state.get("cuda_rng_state_all") is not None:
+        torch.cuda.set_rng_state_all(state["cuda_rng_state_all"])
+
+
+def _save_training_state(
+    checkpoint_dir: Path,
+    *,
+    optimizer: torch.optim.Optimizer,
+    scheduler,
+    epoch_completed: int,
+    global_step: int,
+    best_metric: float,
+    history: list[dict[str, Any]],
+    run_config: dict[str, Any],
+) -> None:
+    payload = {
+        "schema_version": 1,
+        "epoch_completed": int(epoch_completed),
+        "global_step": int(global_step),
+        "best_metric": float(best_metric),
+        "history": history,
+        "optimizer_state_dict": optimizer.state_dict(),
+        "scheduler_state_dict": scheduler.state_dict(),
+        "run_config": run_config,
+        "rng": _capture_rng_state(),
+    }
+    torch.save(payload, checkpoint_dir / TRAINING_STATE_FILE)
 
 
 def main() -> None:
@@ -259,7 +324,7 @@ def main() -> None:
     output = resolve_project_path(
         args.output or pref.get("checkpoint_dir", "checkpoints/tripmind-preference")
     )
-    base_model = args.model or pref.get("base_model", "Qwen/Qwen2.5-0.5B-Instruct")
+    requested_base_model = args.model or pref.get("base_model", "Qwen/Qwen2.5-0.5B-Instruct")
     epochs = int(args.epochs if args.epochs is not None else pref.get("epochs", 2))
     batch_size = int(args.batch_size if args.batch_size is not None else pref.get("batch_size", 2))
     grad_accum = int(
@@ -271,8 +336,8 @@ def main() -> None:
     weight_decay = float(args.weight_decay if args.weight_decay is not None else pref.get("weight_decay", 0.01))
     warmup_ratio = float(args.warmup_ratio if args.warmup_ratio is not None else pref.get("warmup_ratio", 0.05))
     max_grad_norm = float(args.max_grad_norm if args.max_grad_norm is not None else pref.get("max_grad_norm", 1.0))
-    max_length = int(args.max_length if args.max_length is not None else pref.get("max_length", 1024))
-    history_char_limit = int(
+    requested_max_length = int(args.max_length if args.max_length is not None else pref.get("max_length", 1024))
+    requested_history_char_limit = int(
         args.history_char_limit
         if args.history_char_limit is not None
         else pref.get("history_char_limit", 6000)
@@ -300,10 +365,10 @@ def main() -> None:
     train_contexts = count_contexts(train_paths, args.max_train_contexts)
 
     manifest_path = data_root / "manifest.json"
-    negatives_per_context = 4
-    if manifest_path.is_file():
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        negatives_per_context = int(manifest.get("negatives_per_positive", 4))
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.is_file() else {}
+    if manifest and manifest.get("evaluation_scope") != "sampled_cross_category_ranking_only":
+        raise ValueError("Training expects the GenUP sampled cross-category dataset schema.")
+    negatives_per_context = int(manifest.get("negatives_per_positive", 4))
     estimated_pairs = train_contexts * negatives_per_context
     batches_per_epoch = max(1, math.ceil(estimated_pairs / batch_size))
     optimizer_steps_per_epoch = max(1, math.ceil(batches_per_epoch / grad_accum))
@@ -311,18 +376,68 @@ def main() -> None:
     warmup_steps = int(total_steps * warmup_ratio)
 
     device = resolve_device(args.device)
-    tokenizer = load_tokenizer(base_model)
-    model = PreferenceScoringModel.from_base_model(
-        base_model,
-        device=device,
-        gradient_checkpointing=gradient_checkpointing,
-    )
+    resume_dir = resolve_project_path(args.resume_from) if args.resume_from else None
+    start_epoch = 0
+    global_step = 0
+    best_metric = -1.0
+    history: list[dict[str, Any]] = []
+
+    if resume_dir is not None:
+        state_path = resume_dir / TRAINING_STATE_FILE
+        if not state_path.is_file():
+            raise FileNotFoundError(
+                f"Resume state not found: {state_path}. Use a training 'last' checkpoint, not an inference-only checkpoint."
+            )
+        model, tokenizer, metadata = PreferenceScoringModel.load_checkpoint(
+            resume_dir, device=device
+        )
+        base_model = str(metadata["base_model"])
+        max_length = int(metadata.get("max_length", requested_max_length))
+        history_char_limit = int(
+            metadata.get("history_char_limit", requested_history_char_limit)
+        )
+        if args.model is not None and args.model != base_model:
+            raise ValueError("--model cannot change when resuming training")
+        if args.max_length is not None and args.max_length != max_length:
+            raise ValueError("--max-length cannot change when resuming training")
+        if (
+            args.history_char_limit is not None
+            and args.history_char_limit != history_char_limit
+        ):
+            raise ValueError("--history-char-limit cannot change when resuming training")
+        if gradient_checkpointing and hasattr(model.backbone, "gradient_checkpointing_enable"):
+            model.backbone.gradient_checkpointing_enable()
+        if hasattr(model.backbone.config, "use_cache"):
+            model.backbone.config.use_cache = False
+    else:
+        base_model = requested_base_model
+        max_length = requested_max_length
+        history_char_limit = requested_history_char_limit
+        tokenizer = load_tokenizer(base_model)
+        model = PreferenceScoringModel.from_base_model(
+            base_model,
+            device=device,
+            gradient_checkpointing=gradient_checkpointing,
+        )
+
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     scheduler = get_linear_schedule_with_warmup(
         optimizer,
         num_warmup_steps=warmup_steps,
         num_training_steps=total_steps,
     )
+
+    if resume_dir is not None:
+        state = _torch_load(resume_dir / TRAINING_STATE_FILE)
+        optimizer.load_state_dict(state["optimizer_state_dict"])
+        _move_optimizer_state(optimizer, device)
+        scheduler.load_state_dict(state["scheduler_state_dict"])
+        start_epoch = int(state.get("epoch_completed", 0))
+        global_step = int(state.get("global_step", 0))
+        best_metric = float(state.get("best_metric", -1.0))
+        history = list(state.get("history", []))
+        _restore_rng_state(state.get("rng", {}))
+        print(f"Resumed from {resume_dir}: completed_epochs={start_epoch}, global_step={global_step}")
 
     dataset = PairwiseJsonlDataset(
         train_paths,
@@ -341,10 +456,24 @@ def main() -> None:
     )
 
     output.mkdir(parents=True, exist_ok=True)
-    best_metric = -1.0
-    global_step = 0
     optimizer.zero_grad(set_to_none=True)
-    history: list[dict[str, Any]] = []
+
+    run_config = {
+        "data_root": str(data_root),
+        "base_model": base_model,
+        "epochs": epochs,
+        "batch_size": batch_size,
+        "gradient_accumulation_steps": grad_accum,
+        "learning_rate": lr,
+        "weight_decay": weight_decay,
+        "warmup_ratio": warmup_ratio,
+        "max_grad_norm": max_grad_norm,
+        "max_length": max_length,
+        "history_char_limit": history_char_limit,
+        "history_dropout": history_dropout,
+        "seed": seed,
+        "evaluation_scope": "sampled_cross_category_ranking_only",
+    }
 
     print(
         json.dumps(
@@ -354,16 +483,22 @@ def main() -> None:
                 "train_contexts": train_contexts,
                 "estimated_pairs": estimated_pairs,
                 "epochs": epochs,
+                "start_epoch": start_epoch,
                 "batch_size": batch_size,
                 "gradient_accumulation_steps": grad_accum,
                 "total_optimizer_steps": total_steps,
                 "history_dropout": history_dropout,
+                "evaluation_scope": "sampled_cross_category_ranking_only",
             },
             indent=2,
         )
     )
 
-    for epoch in range(epochs):
+    if start_epoch >= epochs:
+        print(f"Nothing to do: checkpoint already completed {start_epoch} epochs (target={epochs}).")
+        return
+
+    for epoch in range(start_epoch, epochs):
         dataset.set_epoch(epoch)
         model.train()
         running_loss = 0.0
@@ -424,21 +559,38 @@ def main() -> None:
         history.append(epoch_row)
         print(json.dumps(epoch_row, indent=2))
 
+        improved = metrics["pairwise_accuracy"] > best_metric
+        if improved:
+            best_metric = metrics["pairwise_accuracy"]
+
         save_extra = {
             "training_epoch": epoch + 1,
             "history_dropout": history_dropout,
             "validation_metrics": metrics,
+            "evaluation_scope": "sampled_cross_category_ranking_only",
+            "same_category_ranking_supported": False,
         }
+        last_dir = output / "last"
         model.save_checkpoint(
-            output / "last",
+            last_dir,
             tokenizer,
             base_model=base_model,
             max_length=max_length,
             history_char_limit=history_char_limit,
             extra=save_extra,
         )
-        if metrics["pairwise_accuracy"] > best_metric:
-            best_metric = metrics["pairwise_accuracy"]
+        _save_training_state(
+            last_dir,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            epoch_completed=epoch + 1,
+            global_step=global_step,
+            best_metric=best_metric,
+            history=history,
+            run_config=run_config,
+        )
+
+        if improved:
             model.save_checkpoint(
                 output / "best",
                 tokenizer,
@@ -454,12 +606,16 @@ def main() -> None:
         "history": history,
         "best_checkpoint": str(output / "best"),
         "last_checkpoint": str(output / "last"),
+        "resume_checkpoint": str(output / "last"),
+        "evaluation_scope": "sampled_cross_category_ranking_only",
+        "same_category_ranking_supported": False,
     }
     (output / "train_summary.json").write_text(
         json.dumps(summary, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
     print("Training complete:", output / "best")
+    print("Resume checkpoint:", output / "last")
 
 
 if __name__ == "__main__":
