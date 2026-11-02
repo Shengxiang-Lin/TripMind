@@ -1,4 +1,4 @@
-"""Small offline fixture test for the GenUP preference adapter."""
+"""Small offline fixture test for the GenUP category-preference adapter."""
 from __future__ import annotations
 
 import tempfile
@@ -11,6 +11,7 @@ if str(ROOT) not in sys.path:
 
 import pandas as pd
 
+from tripmind.processing.common import stable_id
 from tripmind.processing.genup import (
     iter_preference_contexts,
     parse_history_visits,
@@ -50,10 +51,9 @@ def main() -> None:
         root = Path(temp)
         train = root / "train"
         test = root / "test"
-        train.mkdir(); test.mkdir()
+        train.mkdir()
+        test.mkdir()
 
-        # POIs 1..8 create a candidate catalogue. User 0 has observed 1,2 and
-        # targets 3 and 4 across contexts, so none of 1..4 may become negatives.
         rows = [
             {
                 "system_prompt": profile(0),
@@ -67,7 +67,15 @@ def main() -> None:
             },
             {
                 "system_prompt": profile(1),
-                "inputs": trajectory(1, [(5, "Museum", 10), (6, "Park", 20), (7, "Museum", 10), (8, "Cafe", 30)]),
+                "inputs": trajectory(
+                    1,
+                    [
+                        (5, "Museum", 10),
+                        (6, "Park", 20),
+                        (7, "Museum", 10),
+                        (8, "Cafe", 30),
+                    ],
+                ),
                 "targets": target(1, 5),
             },
         ]
@@ -80,20 +88,32 @@ def main() -> None:
                 dataset_name="fixture",
                 source_url="https://example.invalid",
                 negatives_per_positive=2,
-                hard_negative_fraction=0.5,
+                hard_negative_fraction=0.0,
                 validation_fraction=0.0,
             )
         )
         assert records
-        user0 = [r for r in records if r["user_key"] == records[0]["user_key"]]
+
+        # Do not infer user identity from iteration order: test/ may be visited before train/.
+        user0_key = stable_id("fixture", "user", "0")[:20]
+        user0 = [record for record in records if record["user_key"] == user0_key]
         assert user0
         for record in user0:
             negative_ids = {x["poi_id"] for x in record["negative_candidates"]}
             assert not negative_ids & {"1", "2", "3", "4"}
             assert record["positive_candidate"]["poi_id"] not in negative_ids
-        assert any(r["upstream_split"] == "test" and r["split"] == "test" for r in records)
+            positive_category = record["positive_candidate"].get("category_id")
+            assert all(
+                candidate.get("category_id") != positive_category
+                for candidate in record["negative_candidates"]
+            )
 
-    print("GENUP PREFERENCE FIXTURE PASSED")
+        assert any(
+            record["upstream_split"] == "test" and record["split"] == "test"
+            for record in records
+        )
+
+    print("GENUP CATEGORY-PREFERENCE FIXTURE PASSED")
 
 
 if __name__ == "__main__":
