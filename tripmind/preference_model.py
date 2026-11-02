@@ -218,4 +218,11 @@ class PreferenceScorer:
             candidates,
             history_char_limit=self.history_char_limit,
         )
-        return self.score_prompts(prompts)
+        # Category-only prompts repeat across many POIs. Score each distinct
+        # input once, then preserve the original POI order for downstream blending.
+        unique_prompts = list(dict.fromkeys(prompts))
+        unique_scores = self.score_prompts(unique_prompts)
+        if len(unique_scores) != len(unique_prompts):
+            raise RuntimeError("Preference scorer returned the wrong number of scores")
+        score_by_prompt = dict(zip(unique_prompts, unique_scores))
+        return [score_by_prompt[prompt] for prompt in prompts]

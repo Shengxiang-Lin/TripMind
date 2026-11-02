@@ -14,7 +14,7 @@ This means the learned model supports **cross-category preference ranking**, not
 
 ```bash
 conda activate tripmind
-python -m pip install -r requirements-training.txt
+python -m pip install -r requirements.txt
 python scripts/download_data.py --source genup
 python training/build_genup_preference_dataset.py
 python evaluation/genup_preference.py --root data/processed/genup_preference

@@ -79,7 +79,13 @@ def main() -> None:
                 "targets": target(1, 5),
             },
         ]
-        pd.DataFrame(rows).to_parquet(train / "part.parquet", index=False)
+        # Supply unseen categories so the held-out user has two valid negatives.
+        donor = {
+            "system_prompt": profile(2),
+            "inputs": trajectory(2, [(9, "Cafe", 30), (10, "Park", 20)]),
+            "targets": target(2, 9),
+        }
+        pd.DataFrame([*rows, donor]).to_parquet(train / "part.parquet", index=False)
         pd.DataFrame(rows[-1:]).to_parquet(test / "part.parquet", index=False)
 
         records = list(

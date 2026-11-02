@@ -1,7 +1,0 @@
-# Install after requirements.txt in the same Python 3.11 environment.
-# Transformers 5.22.1 currently supports Python 3.11+ and PyTorch 2.6+.
--r requirements.txt
-torch>=2.6,<3
-transformers==5.22.1
-accelerate>=1.11,<2
-safetensors>=0.6,<1
