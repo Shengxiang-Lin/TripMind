@@ -109,7 +109,7 @@ class PipelineTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp); run=root/"runs/old"; (run/"knowledge").mkdir(parents=True)
             (run/"knowledge/test").write_text("fixture")
-            quality=dict(knowledge={"chunks":1},index={"kind":"fixture"})
+            quality=dict(knowledge={"chunks":1,"description":"旅行知识"},index={"kind":"fixture"})
             write_json(run/"quality_report.json",quality)
             code={k:"same" for k in CRITICAL_CODE}
             inputs={"wikivoyage/en/file":{"sha256":"same"}}
@@ -120,9 +120,21 @@ class PipelineTests(unittest.TestCase):
             write_json(run/"manifest.json",manifest)
             stage=root/"stage"; stage.mkdir()
             reused=reuse_knowledge(root,stage,inputs,code,settings,runtime)
+            self.assertIsNotNone(reused)
             self.assertEqual(reused[0]["reused_from"],"old")
             self.assertEqual((stage/"knowledge/test").read_text(encoding="utf-8"),"fixture")
+            # Existing Windows builds serialize manifest paths with backslashes.
+            windows=lambda paths: {k.replace("/", "\\"):v for k,v in paths.items()}
+            for key in ["inputs","code","artifacts"]:
+                manifest[key]=windows(manifest[key])
+            write_json(run/"manifest.json",manifest)
+            windows_stage=root/"windows"; windows_stage.mkdir()
+            windows_reused=reuse_knowledge(root,windows_stage,windows(inputs),windows(code),settings,runtime)
+            self.assertIsNotNone(windows_reused)
+            self.assertEqual(windows_reused[0]["description"],"旅行知识")
             stage2=root/"other"; stage2.mkdir()
+            self.assertIsNone(reuse_knowledge(root,stage2,{"wikivoyage/en/file":{"sha256":"changed"}},code,settings,runtime))
+            self.assertIsNone(reuse_knowledge(root,stage2,inputs,{**code,CRITICAL_CODE[0]:"changed"},settings,runtime))
             self.assertIsNone(reuse_knowledge(root,stage2,inputs,code,{**settings,"overlap":20},runtime))
             (run/"knowledge/test").write_text("tampered")
             self.assertIsNone(reuse_knowledge(root,stage2,inputs,code,settings,runtime))
