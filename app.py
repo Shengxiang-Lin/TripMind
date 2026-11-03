@@ -1,5 +1,4 @@
 from __future__ import annotations
-from dataclasses import replace
 from datetime import date
 from pathlib import Path
 import html,json
@@ -9,7 +8,6 @@ import gradio as gr
 from PIL import Image
 from tripmind.data import city_pois
 from tripmind.models import UserProfile
-from tripmind.recommender import HeuristicPersonalizedRanker
 from tripmind.service import TripMindService,itinerary_to_markdown
 service=TripMindService();INTERESTS=["photography","food","culture","history","nature","museum","architecture","night_view","shopping"]
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -62,29 +60,6 @@ def itinerary_images(itinerary):
                 notices.append(f"{html.escape(poi.name)}：图片暂不可用；文字行程不受影响。")
     return gallery, "\n\n".join(notices + credits)
 def history_items(v):return [x.strip() for x in re.split(r"[\n,;，；]+",v or "") if x.strip()]
-def age_comparison(profile, candidates, knowledge, top_k=5):
-    """Compare only age, using identical candidates and static knowledge."""
-    reference_age = "60+" if profile.age_group == "18-25" else "18-25"
-    ranker = HeuristicPersonalizedRanker()
-    lines = [
-        "## 年龄画像对比 · 启发式候选 Top-5",
-        "以下是排程前的规则分数，未叠加实时调整；若启用学习模型，此表仍仅展示启发式规则。"
-        "两组仅年龄不同，候选集（已剔除排除项）与静态知识相同，最终行程不一定变化。",
-    ]
-    for label, age in [("当前画像", profile.age_group), ("参考画像", reference_age)]:
-        ranked = ranker.rank(replace(profile, age_group=age), candidates, knowledge)
-        lines.extend([
-            f"### {label}：{age or '未指定'}",
-            "| 排名 | POI（ID） | 分数 | 理由 |",
-            "| --- | --- | --- | --- |",
-        ])
-        for idx, item in enumerate(ranked[:top_k], 1):
-            name = item.poi.name.replace("|", "\\|").replace("\n", " ")
-            reasons = "; ".join(item.reasons) or "基础兴趣、同行类型、预算、热度与节奏评分"
-            reasons = reasons.replace("|", "\\|").replace("\n", " ")
-            lines.append(f"| {idx} | {name} ({item.poi.poi_id}) | {item.score:.4f} | {reasons} |")
-    return "\n\n" + "\n".join(lines)
-
 def generate(country,city,start_date,days,budget,currency,age_group,travel_group,interests,pace,transport,travel_history,notes,exclude_poi_ids=None):
     try:
         p=UserProfile(country=(country or "China").strip(),city=city.strip() or "杭州",start_date=start_date.strip() or None,days=int(days),budget=float(budget),currency=currency,age_group=age_group,travel_group=travel_group,interests=interests or ["culture"],pace=pace,transport_preference=transport,travel_history=history_items(travel_history),special_preferences=[x.strip() for x in notes.split(",") if x.strip()])
@@ -95,16 +70,11 @@ def generate(country,city,start_date,days,budget,currency,age_group,travel_group
             choices=[(poi.name, poi.poi_id) for poi in candidates],
             value=[poi.poi_id for poi in candidates if poi.poi_id in excluded],
         )
-        comparison = age_comparison(
-            result.profile,
-            [poi for poi in candidates if poi.poi_id not in excluded],
-            result.retrieved_knowledge,
-        )
         gallery, image_details = itinerary_images(result)
         if not any(day.items for day in result.days):
             return (
                 "### 无法生成可行行程\n\n当前候选 POI 无法满足开放时间、游玩时长或预算等约束。"
-                "请取消部分排除勾选或调整预算、天数后重新规划。" + comparison,
+                "请取消部分排除勾选或调整预算、天数后重新规划。",
                 selection,
                 gallery,
                 image_details,
@@ -112,7 +82,7 @@ def generate(country,city,start_date,days,budget,currency,age_group,travel_group
         text = itinerary_to_markdown(result)
         if any(not day.items for day in result.days):
             text = "部分日期无法安排可行 POI，请减少排除项或调整预算、天数。\n\n" + text
-        return text + comparison, selection, gallery, image_details
+        return text, selection, gallery, image_details
     except ValueError as exc:
         selection = gr.skip() if exclude_poi_ids is not None else gr.CheckboxGroup(choices=[], value=[])
         return f"### 无法规划\n\n{exc}", selection, [], ""
