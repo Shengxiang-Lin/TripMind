@@ -64,6 +64,17 @@ class HeuristicPersonalizedRanker:
                 reasons.append("supported_by_retrieved_guide")
             popularity_score = max(0.0, min(1.0, poi.popularity))
             score = 0.38 * interest_score + 0.24 * group_score + 0.14 * budget_score + 0.16 * popularity_score + knowledge_bonus - pace_penalty
+            # Small, soft preference adjustments; all base weights stay unchanged.
+            if profile.age_group == "60+":
+                age_penalty = {"high": 0.08, "medium": 0.03}.get(poi.intensity, 0.0)
+                if age_penalty:
+                    score -= age_penalty
+                    reasons.append(f"age:60+ intensity={poi.intensity} -{age_penalty:.2f}")
+            elif profile.age_group == "18-25":
+                age_hits = tags & {"night_view", "shopping"}
+                if age_hits:
+                    score += 0.04
+                    reasons.append("age:18-25 " + ",".join(sorted(age_hits)) + " +0.04")
             ranked.append(RankedPOI(poi=poi, score=round(score, 4), reasons=reasons))
         return sorted(ranked, key=lambda x: x.score, reverse=True)
 

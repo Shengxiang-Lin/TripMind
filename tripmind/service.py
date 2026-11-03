@@ -141,7 +141,7 @@ class TripMindService:
         self.data_bundle_id = data_cfg.get("bundle_id")
         aliases_file = data_cfg.get("city_aliases_file")
         self.city_registry = (
-            json.loads(resolve_project_path(aliases_file).read_text())
+            json.loads(resolve_project_path(aliases_file).read_text(encoding="utf-8"))
             if aliases_file
             else {}
         )
@@ -179,7 +179,9 @@ class TripMindService:
         self.realtime = realtime_provider or build_realtime_provider(self.config)
         self.planner = GreedyConstraintPlanner(self.map)
 
-    def plan(self, profile: UserProfile) -> Itinerary:
+    def plan(
+        self, profile: UserProfile, exclude_poi_ids: set[str] | None = None
+    ) -> Itinerary:
         city = self.city_lookup.get(normalized(profile.city), profile.city)
         country = (
             "China"
@@ -200,6 +202,11 @@ class TripMindService:
                 f"No POIs available for city={profile.city!r}, "
                 f"country={profile.country!r} in the current local dataset."
             )
+
+        excluded = set(exclude_poi_ids or ())
+        candidates = [poi for poi in candidates if poi.poi_id not in excluded]
+        if not candidates:
+            raise ValueError("排除后没有可用的候选 POI，请取消部分勾选后重新规划。")
 
         if any(poi.currency != profile.currency for poi in candidates):
             raise ValueError(

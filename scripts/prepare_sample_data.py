@@ -154,7 +154,7 @@ def main() -> None:
     for path, value in [(out/"poi/hangzhou.json", pois), (out/"knowledge.json", docs), (out/"queries.json", queries)]:
         path.write_text(json.dumps(value, ensure_ascii=False, indent=2)+"\n", encoding="utf-8")
     # Copy only tracked defaults, never effective config or API keys.
-    sample_config = yaml.safe_load((ROOT/"configs/config.yaml").read_text())
+    sample_config = yaml.safe_load((ROOT/"configs/config.yaml").read_text(encoding="utf-8"))
     for section in ("ors", "dashscope"):
         sample_config[section]["api_key"] = ""
     sample_config["data"]["use_processed"] = False
