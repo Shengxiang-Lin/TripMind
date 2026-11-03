@@ -74,7 +74,7 @@ def main():
             write_json(stage/"manifest.json",manifest)
             stage.rename(run)
         else:
-            manifest=json.loads((run/"manifest.json").read_text())
+            manifest=json.loads((run/"manifest.json").read_text(encoding="utf-8"))
             for relative,digest in manifest["artifacts"].items():
                 assert sha256(run/relative)==digest, f"Existing artifact changed: {relative}"
             print("Reusing matching verified build",build_id,flush=True)
@@ -82,7 +82,7 @@ def main():
             atomic_json(output/"current.json",{"build_id":build_id,"path":f"runs/{build_id}","manifest_sha256":sha256(run/"manifest.json")})
         print("[6/6] VALIDATED",run,flush=True)
         print("Published:",not args.no_publish,flush=True)
-        print(json.dumps(json.loads((run/"quality_report.json").read_text())["validation"],ensure_ascii=False,indent=2),flush=True)
+        print(json.dumps(json.loads((run/"quality_report.json").read_text(encoding="utf-8"))["validation"],ensure_ascii=False,indent=2),flush=True)
 
 
 if __name__=="__main__": main()
