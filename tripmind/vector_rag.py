@@ -1,5 +1,6 @@
 """City-filtered cosine search over local TF-IDF vectors, with source metadata."""
 from __future__ import annotations
+from contextlib import closing
 import json
 import sqlite3
 from pathlib import Path
@@ -15,7 +16,7 @@ class VectorKnowledgeRetriever:
         # Only artifacts generated and checksummed by our local pipeline are loaded.
         self.vectorizer=joblib.load(self.folder/"vectorizer.joblib")
         self.matrix=sparse.load_npz(self.folder/"tfidf.npz")
-        with sqlite3.connect(self.folder/"documents.sqlite") as db:
+        with closing(sqlite3.connect(self.folder/"documents.sqlite")) as db:
             self.metadata=db.execute("SELECT row_idx,city,country,language,doc_id FROM documents ORDER BY row_idx").fetchall()
         if len(self.metadata)!=self.matrix.shape[0]:
             raise ValueError("Knowledge metadata/vector row mismatch")
@@ -29,7 +30,7 @@ class VectorKnowledgeRetriever:
         scores=(self.matrix[indices]@query.T).toarray().ravel()
         ranked=sorted(zip(eligible,scores),key=lambda x:(x[0][1]==profile.city,float(x[1]),x[0][3]=="zh",x[0][4]),reverse=True)
         docs=[]
-        with sqlite3.connect(self.folder/"documents.sqlite") as db:
+        with closing(sqlite3.connect(self.folder/"documents.sqlite")) as db:
             for meta,score in ranked:
                 if score<=0: continue
                 doc=json.loads(db.execute("SELECT metadata FROM documents WHERE row_idx=?",(meta[0],)).fetchone()[0])
