@@ -50,10 +50,10 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(summary["accepted_pois"],2)
             self.assertEqual(summary["merged_pois"],1)
             self.assertEqual(summary["rejected_pois"],1)
-            pois=json.loads((out/"poi/hangzhou.json").read_text())
+            pois=json.loads((out/"poi/hangzhou.json").read_text(encoding="utf-8"))
             self.assertEqual(set(pois[0]["aliases"]),{"Museum 1","Museum 2"})
             self.assertEqual(len(pois[0]["source_metadata"]["source_rows"]),2)
-            rejected=json.loads((out/"quarantine_pois.jsonl").read_text())
+            rejected=json.loads((out/"quarantine_pois.jsonl").read_text(encoding="utf-8"))
             self.assertEqual(rejected["reason"],"nonfinite_numeric")
 
     def test_invalid_source_values_are_rejected(self):
@@ -95,13 +95,13 @@ class PipelineTests(unittest.TestCase):
             raw=Path(temp)/"raw"; folder=raw/"chinatravel"; folder.mkdir(parents=True)
             out=Path(temp)/"out"; out.mkdir()
             for name in ["easy.csv","preference_base50.csv","competition_test.csv"]:
-                with (folder/name).open("w",newline="") as f:
+                with (folder/name).open("w",newline="",encoding="utf-8") as f:
                     writer=csv.DictWriter(f,fieldnames=["uid","nature_language"])
                     writer.writeheader(); writer.writerow(dict(uid="e123",nature_language="same request"))
             summary=build_queries(raw,out)
             self.assertEqual(summary["records"],1)
             self.assertEqual(summary["exact_duplicates"],2)
-            result=json.loads((out/"queries/test.jsonl").read_text())
+            result=json.loads((out/"queries/test.jsonl").read_text(encoding="utf-8"))
             self.assertEqual(len(result["source_files"]),3)
             self.assertEqual(result["split_reason"],"official_holdout_family")
 
@@ -121,7 +121,7 @@ class PipelineTests(unittest.TestCase):
             stage=root/"stage"; stage.mkdir()
             reused=reuse_knowledge(root,stage,inputs,code,settings,runtime)
             self.assertEqual(reused[0]["reused_from"],"old")
-            self.assertEqual((stage/"knowledge/test").read_text(),"fixture")
+            self.assertEqual((stage/"knowledge/test").read_text(encoding="utf-8"),"fixture")
             stage2=root/"other"; stage2.mkdir()
             self.assertIsNone(reuse_knowledge(root,stage2,inputs,code,{**settings,"overlap":20},runtime))
             (run/"knowledge/test").write_text("tampered")
