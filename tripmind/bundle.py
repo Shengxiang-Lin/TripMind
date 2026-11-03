@@ -14,13 +14,13 @@ def resolve_runtime_data(data: dict) -> dict:
     pointer_path=root/"current.json"
     if not pointer_path.is_file():
         raise FileNotFoundError("Processed data is enabled but no bundle is active. Run python scripts/build_data.py, or set data.use_processed=false for the demo.")
-    pointer=json.loads(pointer_path.read_text())
+    pointer=json.loads(pointer_path.read_text(encoding="utf-8"))
     run=(root/pointer["path"]).resolve()
     if not run.is_relative_to(root/"runs") or run.name!=pointer["build_id"]:
         raise ValueError("Invalid data bundle pointer")
     if sha256(run/"manifest.json")!=pointer["manifest_sha256"]:
         raise ValueError("Data bundle manifest checksum mismatch")
-    manifest=json.loads((run/"manifest.json").read_text())
+    manifest=json.loads((run/"manifest.json").read_text(encoding="utf-8"))
     if manifest.get("schema_version")!=1 or not manifest.get("validation_passed") or manifest.get("build_id")!=pointer["build_id"]:
         raise ValueError("Data build has not passed validation")
     for relative,digest in manifest["artifacts"].items():
