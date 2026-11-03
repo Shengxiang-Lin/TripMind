@@ -9,23 +9,31 @@ CRITICAL_CODE = ["tripmind/processing/common.py","tripmind/processing/knowledge.
                  "tripmind/processing/index.py","tripmind/text.py"]
 
 
+def _portable_paths(paths: dict) -> dict:
+    """Compare manifest paths consistently, including existing Windows builds."""
+    return {key.replace("\\", "/"): value for key, value in paths.items()}
+
+
 def reuse_knowledge(output: Path, stage: Path, inputs: dict, code: dict, settings: dict, runtime: dict):
-    wiki_inputs={k:v for k,v in inputs.items() if k.startswith("wikivoyage/")}
+    wiki_inputs={k:v for k,v in _portable_paths(inputs).items() if k.startswith("wikivoyage/")}
+    code=_portable_paths(code)
     for manifest_file in sorted((output/"runs").glob("*/manifest.json")):
         run=manifest_file.parent.resolve()
         try:
-            manifest=json.loads(manifest_file.read_text())
+            manifest=json.loads(manifest_file.read_text(encoding="utf-8"))
             if manifest.get("schema_version")!=1 or not manifest.get("validation_passed"): continue
-            previous={k:v for k,v in manifest["inputs"].items() if k.startswith("wikivoyage/")}
+            previous={k:v for k,v in _portable_paths(manifest["inputs"]).items() if k.startswith("wikivoyage/")}
             if previous!=wiki_inputs or manifest.get("runtime")!=runtime: continue
-            if any(manifest["code"].get(k)!=code.get(k) for k in CRITICAL_CODE): continue
+            previous_code=_portable_paths(manifest["code"])
+            if any(previous_code.get(k)!=code.get(k) for k in CRITICAL_CODE): continue
             if any(manifest["settings"].get(k)!=settings.get(k) for k in ["languages","chunk_size","overlap"]): continue
-            expected={k:v for k,v in manifest["artifacts"].items() if k.startswith("knowledge/")}
-            actual={str(p.relative_to(run)) for p in (run/"knowledge").rglob("*") if p.is_file()}
+            artifacts=_portable_paths(manifest["artifacts"])
+            expected={k:v for k,v in artifacts.items() if k.startswith("knowledge/")}
+            actual={p.relative_to(run).as_posix() for p in (run/"knowledge").rglob("*") if p.is_file()}
             if not expected or set(expected)!=actual: continue
             expected["quality_report.json"]=manifest["artifacts"]["quality_report.json"]
             if any(not (run/k).resolve().is_relative_to(run) or (run/k).is_symlink() or sha256(run/k)!=digest for k,digest in expected.items()): continue
-            quality=json.loads((run/"quality_report.json").read_text())
+            quality=json.loads((run/"quality_report.json").read_text(encoding="utf-8"))
         except (OSError,ValueError,KeyError,TypeError):
             continue
         shutil.copytree(run/"knowledge",stage/"knowledge")
