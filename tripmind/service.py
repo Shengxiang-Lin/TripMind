@@ -141,7 +141,7 @@ class TripMindService:
         self.data_bundle_id = data_cfg.get("bundle_id")
         aliases_file = data_cfg.get("city_aliases_file")
         self.city_registry = (
-            json.loads(resolve_project_path(aliases_file).read_text())
+            json.loads(resolve_project_path(aliases_file).read_text(encoding="utf-8"))
             if aliases_file
             else {}
         )
