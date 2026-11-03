@@ -744,15 +744,20 @@
       "download_url": "https://upload.wikimedia.org/wikipedia/commons/1/1b/Tiananmen_Square.JPG?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled",
       "sha256": "9a7571485fa8c28be3699137f1b2e0f32967fdc0defbd134cb9c91fef52a4516",
       "byte_size": 169240,
-      "width": 960,
-      "height": 637,
+      "width": 772,
+      "height": 512,
       "changes": "Wikimedia thumbnail; no local crop, retouching or AI generation",
       "source_description": "Groups of people wander around Tiananmen Square in the late afternoon.",
       "capture_date": "",
       "attribution": "Paul Louis / File:Tiananmen Square.JPG / CC BY-SA 3.0",
       "selection_frequency": 3,
       "selection_profile_count": 18,
-      "verification_note": "Manually matched by POI name, file description and local visual review."
+      "verification_note": "Manually matched by POI name, file description and local visual review.",
+      "commons_reported_dimensions": {
+        "width": 960,
+        "height": 637
+      },
+      "dimension_verification": "Measured from the downloaded JPEG; server returned a smaller image than imageinfo thumbnail dimensions."
     },
     "chinatravel:北京:29": {
       "poi_id": "chinatravel:北京:29",
@@ -940,15 +945,20 @@
       "download_url": "https://upload.wikimedia.org/wikipedia/commons/6/68/Beihai_park_-_bridge_to_white_pagoda.JPG?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled",
       "sha256": "425656b4b013912b6c94e74f05e6bf36daf24f33641e2b1ab514838c698fb02d",
       "byte_size": 164259,
-      "width": 960,
-      "height": 720,
+      "width": 640,
+      "height": 480,
       "changes": "Wikimedia thumbnail; no local crop, retouching or AI generation",
       "source_description": "Brightly-coloured flags decorate a bridge within Beihai Park, Beijing on a bright spring day in China.",
       "capture_date": "2004-10",
       "attribution": "me (w:User:pfctdayelise) / File:Beihai park - bridge to white pagoda.JPG / CC BY-SA 2.5",
       "selection_frequency": 2,
       "selection_profile_count": 18,
-      "verification_note": "Manually matched by POI name, file description and local visual review."
+      "verification_note": "Manually matched by POI name, file description and local visual review.",
+      "commons_reported_dimensions": {
+        "width": 960,
+        "height": 720
+      },
+      "dimension_verification": "Measured from the downloaded JPEG; server returned a smaller image than imageinfo thumbnail dimensions."
     },
     "chinatravel:北京:37": {
       "poi_id": "chinatravel:北京:37",
