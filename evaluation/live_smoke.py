@@ -82,7 +82,7 @@ def main():
         query = {"uid":row["uid"],"nature_language":row["request"],"target_city":row["target_city"],
                  "days":row["days"],"people_number":row["people_number"]}
     else:
-        query = json.loads((resolve_project_path(args.sample_config).parent/"queries.json").read_text())[0]
+        query = json.loads((resolve_project_path(args.sample_config).parent/"queries.json").read_text(encoding="utf-8"))[0]
     budget = re.search(r"预算\s*(\d+)", query["nature_language"])
     first = UserProfile(
         city=query["target_city"], days=int(query["days"]),
