@@ -1,0 +1,1191 @@
+
+/* =====================================================
+   TripMind - Modern Travel Dashboard
+   Phase 1: Visual redesign
+   ===================================================== */
+
+
+/* -----------------------------------------------------
+   1. Global design variables
+   ----------------------------------------------------- */
+
+:root {
+    --tm-bg: #F5F5EF;
+    --tm-surface: #FFFFFF;
+    --tm-primary: #214B3B;
+    --tm-primary-hover: #173B2E;
+    --tm-accent: #D99B54;
+
+    --tm-text: #292F2B;
+    --tm-muted: #8A948C;
+
+    --tm-border: #E7EAE2;
+    --tm-soft-green: #EDF3EE;
+    --tm-soft-orange: #FBF3E8;
+
+    --tm-radius-lg: 22px;
+    --tm-radius-md: 14px;
+    --tm-radius-sm: 10px;
+
+    --tm-shadow:
+        0 8px 28px rgba(37, 62, 47, 0.055);
+}
+
+
+/* -----------------------------------------------------
+   2. Global page
+   ----------------------------------------------------- */
+
+.gradio-container {
+    background-color: var(--tm-bg) !important;
+
+    color: var(--tm-text) !important;
+
+    font-family:
+        Inter,
+        "Segoe UI",
+        "Microsoft YaHei",
+        Arial,
+        sans-serif !important;
+}
+
+#tripmind-app {
+    width: 100%;
+}
+
+
+/* -----------------------------------------------------
+   3. Main page container
+   ----------------------------------------------------- */
+
+#tripmind-app .tm-shell {
+    width: 100% !important;
+
+    max-width: 1440px !important;
+
+    margin: 0 auto !important;
+
+    padding: 28px 28px 56px !important;
+
+    gap: 22px !important;
+}
+
+
+/* -----------------------------------------------------
+   4. Top navigation / brand
+   ----------------------------------------------------- */
+
+#tripmind-app .tm-topbar {
+    display: flex;
+
+    align-items: center;
+
+    justify-content: space-between;
+
+    background: var(--tm-surface) !important;
+
+    border: 1px solid var(--tm-border) !important;
+
+    border-radius: 16px !important;
+
+    padding: 8px 22px !important;
+
+    box-shadow: var(--tm-shadow);
+}
+
+#tripmind-app .tm-brand h2 {
+    color: var(--tm-primary) !important;
+
+    font-size: 25px !important;
+
+    font-weight: 800 !important;
+
+    letter-spacing: -0.8px;
+
+    margin: 0 !important;
+}
+
+#tripmind-app .tm-topbar-note {
+    color: var(--tm-muted) !important;
+
+    font-size: 11px !important;
+
+    font-weight: 700 !important;
+
+    letter-spacing: 1.2px;
+
+    text-align: right;
+}
+
+
+/* -----------------------------------------------------
+   5. Hero section
+   ----------------------------------------------------- */
+
+#tripmind-app .tm-hero {
+    padding: 18px 8px 4px !important;
+}
+
+#tripmind-app .tm-hero h1 {
+    color: var(--tm-primary) !important;
+
+    font-size: clamp(34px, 4vw, 52px) !important;
+
+    line-height: 1.16 !important;
+
+    letter-spacing: -1.8px;
+
+    font-weight: 800 !important;
+
+    margin-bottom: 12px !important;
+}
+
+#tripmind-app .tm-hero p {
+    color: var(--tm-muted) !important;
+
+    font-size: 15px !important;
+
+    line-height: 1.8 !important;
+
+    max-width: 700px;
+}
+
+
+/* -----------------------------------------------------
+   6. Metadata
+   ----------------------------------------------------- */
+
+#tripmind-app .tm-meta-line {
+    padding: 10px 14px !important;
+
+    background: var(--tm-soft-green) !important;
+
+    border-radius: 10px !important;
+
+    color: var(--tm-muted) !important;
+
+    font-size: 12px !important;
+}
+
+#tripmind-app .tm-meta-line strong {
+    color: var(--tm-primary) !important;
+
+    font-weight: 700 !important;
+}
+
+
+/* -----------------------------------------------------
+   7. Main workspace
+   ----------------------------------------------------- */
+
+#tripmind-app .tm-main-layout {
+    align-items: flex-start !important;
+
+    gap: 22px !important;
+}
+
+
+/* -----------------------------------------------------
+   8. Main panels
+   ----------------------------------------------------- */
+
+#tripmind-app .tm-panel {
+    background: var(--tm-surface) !important;
+
+    border: 1px solid var(--tm-border) !important;
+
+    border-radius: var(--tm-radius-lg) !important;
+
+    padding: 24px !important;
+
+    box-shadow: var(--tm-shadow);
+}
+
+#tripmind-app .tm-panel-heading h3 {
+    color: var(--tm-primary) !important;
+
+    font-size: 21px !important;
+
+    font-weight: 750 !important;
+
+    margin-bottom: 6px !important;
+}
+
+#tripmind-app .tm-panel-heading p {
+    color: var(--tm-muted) !important;
+
+    font-size: 13px !important;
+
+    line-height: 1.7 !important;
+}
+
+
+/* -----------------------------------------------------
+   9. Section titles
+   ----------------------------------------------------- */
+
+#tripmind-app .tm-section-title {
+    color: var(--tm-primary) !important;
+
+    font-size: 11px !important;
+
+    font-weight: 800 !important;
+
+    letter-spacing: 1.3px;
+
+    padding-top: 12px !important;
+
+    border-top: 1px solid var(--tm-border);
+}
+
+
+/* -----------------------------------------------------
+   10. Form labels and input fields
+   ----------------------------------------------------- */
+
+#tripmind-app .tm-field label {
+    color: var(--tm-text) !important;
+
+    font-size: 13px !important;
+
+    font-weight: 650 !important;
+}
+
+#tripmind-app .tm-field input,
+#tripmind-app .tm-field textarea,
+#tripmind-app .tm-field [role="combobox"] {
+    background: #FCFDFB !important;
+
+    border: 1px solid var(--tm-border) !important;
+
+    border-radius: var(--tm-radius-sm) !important;
+
+    color: var(--tm-text) !important;
+
+    font-size: 14px !important;
+
+    box-shadow: none !important;
+}
+
+#tripmind-app .tm-field input:focus,
+#tripmind-app .tm-field textarea:focus {
+    border-color: var(--tm-primary) !important;
+
+    box-shadow:
+        0 0 0 3px rgba(33, 75, 59, 0.08) !important;
+}
+
+#tripmind-app .tm-field input::placeholder,
+#tripmind-app .tm-field textarea::placeholder {
+    color: #AAB2AA !important;
+}
+
+
+/* -----------------------------------------------------
+   11. Radio buttons and checkboxes
+   ----------------------------------------------------- */
+
+#tripmind-app .tm-field {
+    color: var(--tm-text) !important;
+}
+
+#tripmind-app .tm-field label span {
+    font-size: 13px !important;
+}
+
+
+/* -----------------------------------------------------
+   12. Primary button
+   ----------------------------------------------------- */
+
+#tripmind-app .tm-primary-btn button {
+    width: 100% !important;
+
+    min-height: 54px !important;
+
+    background: var(--tm-primary) !important;
+
+    color: #FFFFFF !important;
+
+    border: none !important;
+
+    border-radius: 13px !important;
+
+    font-size: 15px !important;
+
+    font-weight: 750 !important;
+
+    box-shadow:
+        0 5px 14px rgba(33, 75, 59, 0.17);
+
+    transition:
+        background 0.2s ease,
+        transform 0.2s ease,
+        box-shadow 0.2s ease;
+}
+
+#tripmind-app .tm-primary-btn button:hover {
+    background: var(--tm-primary-hover) !important;
+
+    transform: translateY(-2px);
+
+    box-shadow:
+        0 8px 20px rgba(33, 75, 59, 0.22);
+}
+
+
+/* -----------------------------------------------------
+   13. Secondary button
+   ----------------------------------------------------- */
+
+#tripmind-app .tm-secondary-btn button {
+    background: var(--tm-soft-green) !important;
+
+    color: var(--tm-primary) !important;
+
+    border: 1px solid #DCE8DE !important;
+
+    border-radius: 11px !important;
+
+    font-weight: 700 !important;
+
+    transition: all 0.2s ease;
+}
+
+#tripmind-app .tm-secondary-btn button:hover {
+    background: #E1ECE3 !important;
+}
+
+
+/* -----------------------------------------------------
+   14. Helper text
+   ----------------------------------------------------- */
+
+#tripmind-app .tm-helper-text {
+    color: var(--tm-muted) !important;
+
+    font-size: 11px !important;
+
+    line-height: 1.7 !important;
+
+    text-align: center;
+}
+
+
+/* -----------------------------------------------------
+   15. Results header
+   ----------------------------------------------------- */
+
+#tripmind-app .tm-results-heading {
+    align-items: center !important;
+
+    justify-content: space-between !important;
+}
+
+#tripmind-app .tm-status-label {
+    background: var(--tm-soft-orange) !important;
+
+    color: #A66D2C !important;
+
+    border-radius: 20px !important;
+
+    padding: 5px 10px !important;
+
+    font-size: 10px !important;
+
+    font-weight: 800 !important;
+
+    letter-spacing: 0.8px;
+}
+
+
+/* -----------------------------------------------------
+   16. Itinerary output
+   ----------------------------------------------------- */
+
+#tripmind-app .tm-itinerary-output {
+    background: #FCFDFB !important;
+
+    border: 1px solid var(--tm-border) !important;
+
+    border-radius: var(--tm-radius-md) !important;
+
+    padding: 20px !important;
+
+    min-height: 180px;
+}
+
+#tripmind-app .tm-itinerary-output h1,
+#tripmind-app .tm-itinerary-output h2,
+#tripmind-app .tm-itinerary-output h3 {
+    color: var(--tm-primary) !important;
+
+    font-weight: 750 !important;
+}
+
+#tripmind-app .tm-itinerary-output p,
+#tripmind-app .tm-itinerary-output li {
+    color: var(--tm-text) !important;
+
+    font-size: 14px !important;
+
+    line-height: 1.85 !important;
+}
+
+#tripmind-app .tm-itinerary-output a {
+    color: var(--tm-primary) !important;
+}
+
+
+/* -----------------------------------------------------
+   17. POI image gallery
+   ----------------------------------------------------- */
+
+#tripmind-app .tm-gallery {
+    border: 1px solid var(--tm-border) !important;
+
+    border-radius: var(--tm-radius-md) !important;
+
+    overflow: hidden;
+}
+
+#tripmind-app .tm-gallery img {
+    border-radius: 12px !important;
+}
+
+
+/* -----------------------------------------------------
+   18. Image details and attribution
+   ----------------------------------------------------- */
+
+#tripmind-app .tm-image-details {
+    color: var(--tm-muted) !important;
+
+    font-size: 11px !important;
+
+    line-height: 1.8 !important;
+}
+
+#tripmind-app .tm-image-details a {
+    color: var(--tm-primary) !important;
+
+    text-decoration: underline !important;
+}
+
+
+/* -----------------------------------------------------
+   19. Advanced customization accordion
+   ----------------------------------------------------- */
+
+#tripmind-app .tm-accordion {
+    background: #FCFDFB !important;
+
+    border: 1px solid var(--tm-border) !important;
+
+    border-radius: 13px !important;
+
+    padding: 10px !important;
+}
+
+#tripmind-app .tm-accordion summary {
+    color: var(--tm-primary) !important;
+
+    font-weight: 700 !important;
+}
+
+
+/* -----------------------------------------------------
+   20. Responsive design: tablet
+   ----------------------------------------------------- */
+
+@media (max-width: 900px) {
+
+    #tripmind-app .tm-main-layout {
+        flex-direction: column !important;
+    }
+
+    #tripmind-app .tm-main-layout > .tm-panel {
+        width: 100% !important;
+
+        flex: 1 1 100% !important;
+    }
+
+}
+
+
+/* -----------------------------------------------------
+   21. Responsive design: mobile
+   ----------------------------------------------------- */
+
+@media (max-width: 640px) {
+
+    #tripmind-app .tm-shell {
+        padding: 14px 12px 30px !important;
+
+        gap: 15px !important;
+    }
+
+    #tripmind-app .tm-topbar {
+        padding: 8px 14px !important;
+    }
+
+    #tripmind-app .tm-brand h2 {
+        font-size: 21px !important;
+    }
+
+    #tripmind-app .tm-topbar-note {
+        display: none !important;
+    }
+
+    #tripmind-app .tm-hero {
+        padding: 10px 4px !important;
+    }
+
+    #tripmind-app .tm-hero h1 {
+        font-size: 34px !important;
+
+        letter-spacing: -1px;
+    }
+
+    #tripmind-app .tm-panel {
+        padding: 17px !important;
+
+        border-radius: 17px !important;
+    }
+
+    #tripmind-app .tm-itinerary-output {
+        padding: 14px !important;
+    }
+
+}
+
+/* =====================================================
+   TripMind - Phase 1 visual correction
+   Force light theme and unify Gradio components
+   ===================================================== */
+
+/* 1. Force the entire application to use a light palette */
+:root,
+.gradio-container,
+#tripmind-app {
+    color-scheme: light !important;
+
+    --body-background-fill: #F5F5EF !important;
+    --background-fill-primary: #F5F5EF !important;
+    --background-fill-secondary: #FFFFFF !important;
+    --block-background-fill: #FFFFFF !important;
+    --block-border-color: #E7EAE2 !important;
+    --input-background-fill: #FFFFFF !important;
+    --input-border-color: #DDE4DC !important;
+    --body-text-color: #292F2B !important;
+    --block-label-text-color: #292F2B !important;
+    --button-primary-background-fill: #214B3B !important;
+    --button-primary-background-fill-hover: #173B2E !important;
+    --button-primary-text-color: #FFFFFF !important;
+}
+
+/* 2. Page background */
+.gradio-container {
+    background: #F5F5EF !important;
+    color: #292F2B !important;
+}
+
+#tripmind-app {
+    background: #F5F5EF !important;
+    color: #292F2B !important;
+}
+
+/* 3. Main cards */
+#tripmind-app .tm-panel {
+    background: #FFFFFF !important;
+    border: 1px solid #E7EAE2 !important;
+    border-radius: 20px !important;
+    box-shadow: 0 8px 28px rgba(37, 62, 47, 0.06) !important;
+}
+
+/* 4. Form labels */
+#tripmind-app .tm-field label,
+#tripmind-app .tm-field span {
+    color: #292F2B !important;
+}
+
+/* 5. Text inputs and textareas */
+#tripmind-app .tm-field input,
+#tripmind-app .tm-field textarea,
+#tripmind-app input,
+#tripmind-app textarea {
+    background: #FFFFFF !important;
+    color: #292F2B !important;
+    border: 1px solid #DDE4DC !important;
+    border-radius: 10px !important;
+    box-shadow: none !important;
+}
+
+/* 6. Dropdowns */
+#tripmind-app .tm-field [role="combobox"],
+#tripmind-app [role="listbox"] {
+    background: #FFFFFF !important;
+    color: #292F2B !important;
+    border-color: #DDE4DC !important;
+}
+
+/* 7. Radio buttons and checkboxes */
+#tripmind-app input[type="checkbox"],
+#tripmind-app input[type="radio"] {
+    accent-color: #214B3B !important;
+}
+
+/* 8. Primary generate button */
+#tripmind-app .tm-primary-btn,
+#tripmind-app .tm-primary-btn button,
+#tripmind-app button.primary {
+    background: #214B3B !important;
+    color: #FFFFFF !important;
+    border: none !important;
+    border-radius: 12px !important;
+}
+
+#tripmind-app .tm-primary-btn button:hover {
+    background: #173B2E !important;
+}
+
+/* 9. Secondary button */
+#tripmind-app .tm-secondary-btn button {
+    background: #EDF3EE !important;
+    color: #214B3B !important;
+    border: 1px solid #DCE8DE !important;
+}
+
+/* 10. Section headings */
+#tripmind-app .tm-section-title {
+    color: #214B3B !important;
+}
+
+/* 11. Itinerary result area */
+#tripmind-app .tm-itinerary-output {
+    background: #FFFFFF !important;
+    color: #292F2B !important;
+    border: 1px solid #E7EAE2 !important;
+    border-radius: 14px !important;
+}
+
+/* 12. Accordion */
+#tripmind-app .tm-accordion,
+#tripmind-app .tm-accordion > div {
+    background: #FFFFFF !important;
+    color: #292F2B !important;
+}
+
+/* 13. Gallery */
+#tripmind-app .tm-gallery {
+    background: #FFFFFF !important;
+    border: 1px solid #E7EAE2 !important;
+    border-radius: 14px !important;
+}
+
+/* 14. Responsive layout */
+@media (max-width: 900px) {
+    #tripmind-app .tm-main-layout {
+        flex-direction: column !important;
+    }
+}
+
+/* =====================================================
+   TripMind Phase 2
+   Image-rich itinerary cards and timeline
+   ===================================================== */
+
+#tripmind-app .tm-itinerary {
+    width: 100%;
+    color: #29342E;
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+}
+
+/* Hero */
+#tripmind-app .tm-itinerary-hero {
+    background: linear-gradient(135deg, #214B3B, #376A50);
+    color: #FFFFFF;
+    padding: 30px;
+    border-radius: 18px;
+}
+
+#tripmind-app .tm-itinerary-eyebrow {
+    font-size: 11px;
+    letter-spacing: 2px;
+    opacity: 0.8;
+    font-weight: 700;
+}
+
+#tripmind-app .tm-itinerary-hero h2 {
+    color: #FFFFFF !important;
+    font-size: 28px;
+    margin: 12px 0 6px;
+}
+
+#tripmind-app .tm-itinerary-hero p {
+    color: #E5EEE7;
+    margin: 0;
+}
+
+/* Statistics */
+#tripmind-app .tm-itinerary-stats {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+}
+
+#tripmind-app .tm-stat {
+    background: #FFFFFF;
+    border: 1px solid #E5EAE3;
+    border-radius: 13px;
+    padding: 17px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+#tripmind-app .tm-stat strong {
+    color: #214B3B;
+    font-size: 21px;
+}
+
+#tripmind-app .tm-stat span {
+    color: #849087;
+    font-size: 12px;
+}
+
+/* Date and notices */
+#tripmind-app .tm-itinerary-date {
+    color: #738078;
+    font-size: 13px;
+}
+
+#tripmind-app .tm-friendly-notice {
+    padding: 14px 17px;
+    background: #F0F5EF;
+    border-left: 4px solid #527D60;
+    border-radius: 9px;
+    color: #42584A;
+    font-size: 13px;
+    line-height: 1.7;
+}
+
+/* Daily section */
+#tripmind-app .tm-day-card {
+    background: #FFFFFF;
+    border: 1px solid #E5EAE3;
+    border-radius: 18px;
+    padding: 22px;
+    box-shadow: 0 5px 20px rgba(35, 65, 45, 0.04);
+}
+
+#tripmind-app .tm-day-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 22px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid #E9EDE8;
+}
+
+#tripmind-app .tm-day-number {
+    color: #214B3B;
+    font-size: 19px;
+    font-weight: 800;
+}
+
+#tripmind-app .tm-day-label {
+    color: #9AA69C;
+    font-size: 10px;
+    letter-spacing: 1px;
+}
+
+/* Timeline */
+#tripmind-app .tm-timeline {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+#tripmind-app .tm-timeline-item {
+    display: flex;
+    align-items: stretch;
+    gap: 13px;
+}
+
+#tripmind-app .tm-timeline-marker {
+    width: 14px;
+    flex-shrink: 0;
+    position: relative;
+    display: flex;
+    justify-content: center;
+}
+
+#tripmind-app .tm-timeline-marker::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: -16px;
+    width: 2px;
+    background: #DCE8DE;
+}
+
+#tripmind-app .tm-timeline-item:last-child
+.tm-timeline-marker::before {
+    display: none;
+}
+
+#tripmind-app .tm-timeline-marker span {
+    position: relative;
+    z-index: 1;
+    width: 11px;
+    height: 11px;
+    margin-top: 16px;
+    border-radius: 50%;
+    background: #376A50;
+    border: 3px solid #E6EFE7;
+}
+
+/* POI card */
+#tripmind-app .tm-poi-card {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    gap: 17px;
+    padding: 13px;
+    border: 1px solid #E9EDE8;
+    border-radius: 14px;
+    background: #FFFFFF;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+#tripmind-app .tm-poi-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 7px 20px rgba(35, 65, 45, 0.08);
+}
+
+#tripmind-app .tm-poi-image {
+    width: 190px;
+    min-width: 190px;
+    height: 150px;
+    object-fit: cover;
+    border-radius: 10px;
+    background: #EEF1EB;
+}
+
+#tripmind-app .tm-poi-image-placeholder {
+    width: 190px;
+    min-width: 190px;
+    height: 150px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background: #F0F3EE;
+    color: #89948B;
+    border-radius: 10px;
+    font-size: 12px;
+}
+
+#tripmind-app .tm-poi-content {
+    flex: 1;
+    min-width: 0;
+}
+
+#tripmind-app .tm-poi-time {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    color: #376A50;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+#tripmind-app .tm-poi-time span {
+    color: #929D94;
+    font-weight: 400;
+}
+
+#tripmind-app .tm-poi-content h3 {
+    margin: 10px 0 5px;
+    color: #263C30;
+    font-size: 19px;
+}
+
+#tripmind-app .tm-poi-category {
+    color: #718579;
+    font-size: 12px;
+    margin-bottom: 8px;
+}
+
+#tripmind-app .tm-poi-description {
+    color: #657169;
+    font-size: 13px;
+    line-height: 1.7;
+    margin: 8px 0;
+}
+
+#tripmind-app .tm-poi-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 15px;
+    color: #376A50;
+    font-size: 12px;
+    font-weight: 600;
+    margin-top: 10px;
+}
+
+#tripmind-app .tm-poi-tags {
+    margin-top: 10px;
+    color: #849087;
+    font-size: 11px;
+}
+
+/* Route */
+#tripmind-app .tm-route-info {
+    margin: 2px 0 2px 27px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    color: #849087;
+    font-size: 11px;
+}
+
+/* Daily summary */
+#tripmind-app .tm-day-summary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 13px;
+    margin-top: 22px;
+    padding: 15px;
+    border-radius: 11px;
+    background: #F2F6F1;
+    color: #718078;
+    font-size: 12px;
+}
+
+#tripmind-app .tm-day-summary strong {
+    color: #214B3B;
+    font-size: 13px;
+}
+
+/* Empty state */
+#tripmind-app .tm-empty-state {
+    padding: 25px;
+    background: #FFFFFF;
+    border: 1px solid #E5EAE3;
+    border-radius: 14px;
+    color: #536258;
+    line-height: 1.7;
+}
+
+#tripmind-app .tm-empty-state h3 {
+    color: #214B3B;
+}
+
+/* Responsive */
+@media (max-width: 900px) {
+    #tripmind-app .tm-itinerary-stats {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    #tripmind-app .tm-poi-card {
+        flex-direction: column;
+    }
+
+    #tripmind-app .tm-poi-image,
+    #tripmind-app .tm-poi-image-placeholder {
+        width: 100%;
+        height: 190px;
+    }
+}
+
+@media (max-width: 520px) {
+    #tripmind-app .tm-itinerary-hero {
+        padding: 20px;
+    }
+
+    #tripmind-app .tm-day-card {
+        padding: 14px;
+    }
+
+    #tripmind-app .tm-poi-image,
+    #tripmind-app .tm-poi-image-placeholder {
+        height: 160px;
+    }
+}
+
+/* =====================================================
+   TripMind - itinerary card layout and spacing fixes
+   ===================================================== */
+
+/* Stack each attraction vertically: title, image, then details. */
+#tripmind-app .tm-poi-card {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 0 !important;
+    padding: 18px !important;
+}
+
+#tripmind-app .tm-poi-content {
+    display: flex !important;
+    flex-direction: column !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    gap: 0 !important;
+}
+
+#tripmind-app .tm-poi-time {
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    flex-wrap: wrap !important;
+    column-gap: 22px !important;
+    row-gap: 6px !important;
+    margin-bottom: 12px !important;
+}
+
+#tripmind-app .tm-poi-time .tm-time-range {
+    color: #376A50 !important;
+    font-weight: 700 !important;
+}
+
+#tripmind-app .tm-poi-time .tm-time-duration {
+    margin-left: auto !important;
+    color: #929D94 !important;
+    white-space: nowrap !important;
+}
+
+#tripmind-app .tm-poi-content h3 {
+    margin: 0 0 12px !important;
+    color: #263C30 !important;
+    font-size: 19px !important;
+    line-height: 1.4 !important;
+}
+
+/* No image element is generated when an attraction has no matched image. */
+#tripmind-app .tm-poi-image {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    height: auto !important;
+    max-height: 430px !important;
+    object-fit: cover !important;
+    object-position: center !important;
+    margin: 0 0 14px !important;
+    border-radius: 12px !important;
+    background: transparent !important;
+}
+
+#tripmind-app .tm-poi-category {
+    margin: 0 0 8px !important;
+}
+
+#tripmind-app .tm-poi-description {
+    margin: 6px 0 10px !important;
+    line-height: 1.8 !important;
+}
+
+#tripmind-app .tm-poi-meta {
+    display: flex !important;
+    align-items: center !important;
+    flex-wrap: wrap !important;
+    column-gap: 24px !important;
+    row-gap: 8px !important;
+    margin-top: 12px !important;
+}
+
+#tripmind-app .tm-poi-meta span {
+    display: inline-block !important;
+    white-space: nowrap !important;
+}
+
+#tripmind-app .tm-route-info {
+    display: flex !important;
+    align-items: center !important;
+    flex-wrap: wrap !important;
+    column-gap: 22px !important;
+    row-gap: 6px !important;
+    margin: 8px 0 8px 27px !important;
+    line-height: 1.6 !important;
+}
+
+#tripmind-app .tm-route-info span {
+    display: inline-block !important;
+    white-space: nowrap !important;
+}
+
+#tripmind-app .tm-route-mode {
+    font-weight: 650 !important;
+}
+
+#tripmind-app .tm-route-distance,
+#tripmind-app .tm-route-duration {
+    color: #849087 !important;
+}
+
+@media (max-width: 640px) {
+    #tripmind-app .tm-poi-card {
+        padding: 13px !important;
+    }
+
+    #tripmind-app .tm-poi-image {
+        max-height: 260px !important;
+    }
+
+    #tripmind-app .tm-poi-meta,
+    #tripmind-app .tm-route-info {
+        column-gap: 16px !important;
+    }
+}
+
+
+/* =====================================================
+   TripMind spacing override - final high-specificity rules
+   ===================================================== */
+#tripmind-app .tm-itinerary-output .tm-poi-time {
+    display: flex !important;
+    justify-content: flex-start !important;
+    align-items: center !important;
+    flex-wrap: wrap !important;
+    column-gap: 5ch !important;
+    row-gap: 8px !important;
+    width: 100% !important;
+}
+#tripmind-app .tm-itinerary-output .tm-poi-time .tm-time-range,
+#tripmind-app .tm-itinerary-output .tm-poi-time .tm-time-duration {
+    display: inline-block !important;
+    white-space: nowrap !important;
+}
+#tripmind-app .tm-itinerary-output .tm-poi-time .tm-time-duration {
+    margin-left: 0 !important;
+}
+#tripmind-app .tm-itinerary-output .tm-poi-meta {
+    display: flex !important;
+    align-items: center !important;
+    flex-wrap: wrap !important;
+    column-gap: 28px !important;
+    row-gap: 10px !important;
+    width: 100% !important;
+    margin-top: 14px !important;
+}
+#tripmind-app .tm-itinerary-output .tm-poi-meta > span {
+    display: inline-block !important;
+    white-space: nowrap !important;
+}
+#tripmind-app .tm-itinerary-output .tm-route-info {
+    display: flex !important;
+    align-items: center !important;
+    flex-wrap: wrap !important;
+    column-gap: 28px !important;
+    row-gap: 8px !important;
+    width: calc(100% - 27px) !important;
+}
+#tripmind-app .tm-itinerary-output .tm-route-info > span {
+    display: inline-block !important;
+    white-space: nowrap !important;
+}
