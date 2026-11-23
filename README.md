@@ -457,11 +457,67 @@ Run the test evaluation once after training decisions are final. It writes
 test rows during training. Field scores measure matching text and do not
 verify itinerary feasibility. The dataset uses template answers.
 
-In Gradio, fill in the trip form and use **生成 AI 行程建议** below the
-results. This button loads the v2 adapter on first use. The original itinerary
-and POI refinement controls continue to use the planner.
+SFT 文案仅 CLI 可用。In Gradio, **生成 AI 行程建议** uses the trip form
+to run the planner and returns the active ranker, daily visits, times, ticket
+prices and preference scores. The main itinerary shows the ranker badge and
+available learned scores and heuristic weights. The planner selects at most
+two POIs per category each day and prefers a second category when feasible.
+
+The planner shortlists candidates by straight-line distance from the city
+center. Unlisted cities use the median latitude and longitude of their POIs.
+
+| Transport | Radius |
+|---|---:|
+| Walking | 8 km |
+| Cycling | 15 km |
+| Transit | 25 km |
+| Driving | 80 km |
+
+With fewer than four candidates it retries at 1.5 times the radius, then uses
+the original candidates if needed. Route durations, opening hours and budget
+still govern scheduling. Sparse or distant options can leave some days with
+fewer visits. The Suzhou regression in `evaluation/regression.py` uses the
+checked-in reach fixture and a downtown park, without a processed bundle.
+
+| Age group | POI bonus | POI penalty |
+|---|---|---|
+| <18 | Family, education, animal, park, museum +0.08 | Nightlife/bar −0.10, over 180 min −0.04 |
+| 18–25 | Night view, shopping, entertainment, food +0.08 | — |
+| 26–40 | — | — |
+| 41–60 | Culture, history, nature +0.04 | High intensity −0.08 |
+| 60+ | Park, nature, museum, gallery +0.06 | High −0.15, medium −0.06, nightlife/bar −0.10, over 180 min −0.05 |
+
+The heuristic uses the age adjustment directly. The learned ranker also adds
+0.15 times the adjustment after blending. These soft rules depend on POI
+metadata coverage and do not guarantee distinct choices for every age group.
+
+Ticket values marked with `*` are from the static ChinaTravel-Sandbox snapshot
+or the demo overrides in `data/price_overrides.json`. Zero means free or missing.
+Confirm prices with the attraction. An override applies only to a matching
+nonpositive CNY price and carries `price_source: manual_demo` and `price_note`
+in POI metadata.
 
 ### POI preference ranking
+
+To build and validate a user-disjoint GenUP split, then run a one-epoch smoke
+comparison in PowerShell from the repository root:
+
+```powershell
+$py = "E:\machine learning\homework5\.venv\Scripts\python.exe"
+$data = "data/processed/genup_preference_usersplit"
+$checkpoint = "checkpoints/tripmind-preference-usersplit"
+& $py training/build_genup_preference_dataset.py --split-by-user --output $data
+& $py scripts/verify_user_split.py --root $data
+& $py evaluation/genup_preference.py --root $data
+& $py training/train_preference_model.py --data-root $data --max-train-contexts 5000 --max-validation-contexts 500 --epochs 1 --output $checkpoint
+& $py evaluation/evaluate_preference_model.py --data-root $data --checkpoint "$checkpoint/best" --split test --max-contexts 500
+& $py evaluation/evaluate_preference_model.py --data-root data/processed/genup_preference --checkpoint checkpoints/tripmind-preference/best --split test --max-contexts 500
+```
+
+The 80/10/10 policy hashes user keys, so all contexts for one user stay in
+one split. The verifier reports all three pairwise user intersections per
+source and across sources. Evaluation caps apply per source. The app still
+loads `checkpoints/tripmind-preference/best`.
 
 The target fine-tuning task is:
 

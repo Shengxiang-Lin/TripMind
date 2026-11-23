@@ -20,6 +20,30 @@ PACE_PENALTY = {
 }
 INDOOR_CATEGORIES = {"museum", "gallery", "shopping", "mall", "aquarium", "theatre", "theater"}
 OUTDOOR_HINTS = {"nature", "park", "scenic", "walk", "hiking", "outdoor"}
+AGE_TAG_BONUSES = {
+    "<18": ({"family", "education", "animal", "park", "museum"}, 0.08),
+    "18-25": ({"night_view", "shopping", "entertainment", "food"}, 0.08),
+    "41-60": ({"culture", "history", "nature"}, 0.04),
+    "60+": ({"park", "nature", "museum", "gallery"}, 0.06),
+}
+
+
+def age_adjustment(profile: UserProfile, poi: POI) -> float:
+    age = profile.age_group
+    if age not in AGE_TAG_BONUSES:
+        return 0.0
+    tags = {value.casefold() for value in (poi.category, *poi.tags)}
+    favored, bonus = AGE_TAG_BONUSES[age]
+    adjustment = bonus if tags & favored else 0.0
+    if age in {"<18", "60+"} and tags & {"nightlife", "bar"}:
+        adjustment -= 0.10
+    if poi.recommended_duration > 180:
+        adjustment -= {"<18": 0.04, "60+": 0.05}.get(age, 0.0)
+    if age == "41-60" and poi.intensity == "high":
+        adjustment -= 0.08
+    if age == "60+":
+        adjustment -= {"high": 0.15, "medium": 0.06}.get(poi.intensity, 0.0)
+    return adjustment
 
 
 def _normalize_model_scores(raw_scores: Sequence[float]) -> list[float]:
@@ -64,17 +88,10 @@ class HeuristicPersonalizedRanker:
                 reasons.append("supported_by_retrieved_guide")
             popularity_score = max(0.0, min(1.0, poi.popularity))
             score = 0.38 * interest_score + 0.24 * group_score + 0.14 * budget_score + 0.16 * popularity_score + knowledge_bonus - pace_penalty
-            # Small, soft preference adjustments; all base weights stay unchanged.
-            if profile.age_group == "60+":
-                age_penalty = {"high": 0.08, "medium": 0.03}.get(poi.intensity, 0.0)
-                if age_penalty:
-                    score -= age_penalty
-                    reasons.append(f"age:60+ intensity={poi.intensity} -{age_penalty:.2f}")
-            elif profile.age_group == "18-25":
-                age_hits = tags & {"night_view", "shopping"}
-                if age_hits:
-                    score += 0.04
-                    reasons.append("age:18-25 " + ",".join(sorted(age_hits)) + " +0.04")
+            age_delta = age_adjustment(profile, poi)
+            if age_delta:
+                score += age_delta
+                reasons.append(f"age:{profile.age_group} {age_delta:+.2f}")
             ranked.append(RankedPOI(poi=poi, score=round(score, 4), reasons=reasons))
         return sorted(ranked, key=lambda x: x.score, reverse=True)
 
@@ -112,6 +129,10 @@ class LearnedPersonalizedRanker:
             heuristic_score = heuristic.score if heuristic else 0.0
             score = (1.0 - self.heuristic_blend) * learned + self.heuristic_blend * heuristic_score
             reasons = ["learned_preference", f"learned_preference_raw:{raw:.4f}", f"learned_preference_normalized:{learned:.4f}"]
+            age_delta = 0.15 * age_adjustment(profile, poi)
+            if age_delta:
+                score += age_delta
+                reasons.append(f"age_adjustment:{age_delta:+.4f}")
             if heuristic and self.heuristic_blend > 0:
                 reasons.append(f"heuristic_blend:{self.heuristic_blend:.2f}")
                 reasons.extend(heuristic.reasons[:2])

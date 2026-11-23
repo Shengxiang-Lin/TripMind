@@ -1189,3 +1189,11 @@
     display: inline-block !important;
     white-space: nowrap !important;
 }
+
+#tripmind-app .tm-ranker-badge {
+    display: inline-block;
+    padding: 0.1em 0.55em;
+    border: 1px solid currentColor;
+    border-radius: 999px;
+    text-transform: none;
+}
