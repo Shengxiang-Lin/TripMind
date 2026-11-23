@@ -499,25 +499,55 @@ in POI metadata.
 
 ### POI preference ranking
 
-To build and validate a user-disjoint GenUP split, then run a one-epoch smoke
-comparison in PowerShell from the repository root:
+To build and validate a user-disjoint GenUP split and run a balanced one-epoch
+smoke comparison in PowerShell from the repository root:
 
 ```powershell
 $py = "E:\machine learning\homework5\.venv\Scripts\python.exe"
 $data = "data/processed/genup_preference_usersplit"
-$checkpoint = "checkpoints/tripmind-preference-usersplit"
+$checkpoint = "checkpoints/tripmind-preference-usersplit-balanced5k"
 & $py training/build_genup_preference_dataset.py --split-by-user --output $data
 & $py scripts/verify_user_split.py --root $data
 & $py evaluation/genup_preference.py --root $data
-& $py training/train_preference_model.py --data-root $data --max-train-contexts 5000 --max-validation-contexts 500 --epochs 1 --output $checkpoint
+& $py training/train_preference_model.py --data-root $data --max-train-contexts-per-source 1667 --max-validation-contexts-per-source 167 --epochs 1 --output $checkpoint
+& $py evaluation/evaluate_preference_model.py --data-root $data --checkpoint checkpoints/tripmind-preference/best --split test --max-contexts 500
+& $py evaluation/evaluate_preference_model.py --data-root $data --checkpoint checkpoints/tripmind-preference-usersplit/best --split test --max-contexts 500
 & $py evaluation/evaluate_preference_model.py --data-root $data --checkpoint "$checkpoint/best" --split test --max-contexts 500
-& $py evaluation/evaluate_preference_model.py --data-root data/processed/genup_preference --checkpoint checkpoints/tripmind-preference/best --split test --max-contexts 500
 ```
 
 The 80/10/10 policy hashes user keys, so all contexts for one user stay in
 one split. The verifier reports all three pairwise user intersections per
-source and across sources. Evaluation caps apply per source. The app still
-loads `checkpoints/tripmind-preference/best`.
+source and across sources.
+
+The two `--max-*-contexts-per-source` options set independent quotas for
+training and validation. They sample across each file using a seed-stable
+random offset and even spacing. The training loader interleaves sources
+before applying the pair shuffle, and the validation report includes metrics
+for each source and the pooled set. The trainer records counts and quotas in
+`train_summary.json`. A per-source training quota is mutually exclusive
+with `--max-train-contexts`; a per-source validation quota takes precedence
+over the global validation cap. Omitting per-source options keeps legacy
+file-order behavior and emits a warning.
+
+The previous 5k runs used a global cap, which filled training from NYC and
+validation from CA. The user-level split addresses within-split evaluation
+leakage. The previously reported +1.33 percentage points compared different
+test sets and does not measure a gain due to the split. All three commands
+above evaluate on the same user-level test rows, capped at 500 per source.
+Reconstructing the old context run with seed 42 found 43 shared users and
+332 shared contexts in the 500-row NYC test subset.
+
+| Checkpoint | Pairwise overall | NYC | TKY | CA | Hit@1 | nDCG |
+|---|---:|---:|---:|---:|---:|---:|
+| Old context 5k | 82.75% | 89.80% | 84.95% | 73.50% | 62.93% | 0.8310 |
+| User split 5k, NYC only | 81.97% | 88.20% | 84.35% | 73.35% | 61.93% | 0.8256 |
+| User split balanced 5k | 84.03% | 87.15% | 86.75% | 78.20% | 65.47% | 0.8431 |
+
+Balanced 5k used 1,667 training and 167 validation contexts per source.
+Its pooled test pairwise accuracy rose by 2.07 percentage points over the
+NYC-only user-split run, with gains in TKY and CA and a decline in NYC.
+This supports a balanced 20k trial with source-level checks. The app default
+checkpoint remains `checkpoints/tripmind-preference/best`.
 
 The target fine-tuning task is:
 

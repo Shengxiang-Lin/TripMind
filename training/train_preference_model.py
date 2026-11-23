@@ -5,6 +5,8 @@ import json
 import math
 import random
 import sys
+from collections import Counter
+from itertools import islice, zip_longest
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -59,6 +61,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--max-train-contexts", type=int, default=None)
     parser.add_argument("--max-validation-contexts", type=int, default=3000)
+    parser.add_argument("--max-train-contexts-per-source", type=int, default=None)
+    parser.add_argument("--max-validation-contexts-per-source", type=int, default=None)
     parser.add_argument("--log-every", type=int, default=20)
     return parser.parse_args()
 
@@ -77,16 +81,56 @@ def data_files(root: Path, split: str) -> list[Path]:
     return paths
 
 
-def count_contexts(paths: list[Path], limit: int | None = None) -> int:
-    total = 0
+def count_lines(path: Path) -> int:
+    with path.open(encoding="utf-8") as stream:
+        return sum(bool(line.strip()) for line in stream)
+
+
+def iter_sampled(path: Path, quota: int, seed: int) -> Iterable[dict[str, Any]]:
+    """Systematic sample with one reproducible random offset in the first stride."""
+    if quota <= 0:
+        raise ValueError("Per-source quota must be positive")
+    total = count_lines(path)
+    if quota >= total:
+        yield from iter_jsonl(path)
+        return
+    # Integer form of floor(offset + sample * total / quota).
+    offset = random.Random(seed).randrange(total)
+    targets = ((offset + sample * total) // quota for sample in range(quota))
+    target = next(targets)
+    with path.open(encoding="utf-8") as stream:
+        for index, line in enumerate(line for line in stream if line.strip()):
+            if index == target:
+                yield json.loads(line)
+                target = next(targets, None)
+                if target is None:
+                    return
+
+
+def source_name(path: Path) -> str:
+    return path.stem.rsplit("-", 1)[0]
+
+
+def source_counts(
+    paths: list[Path], limit: int | None, quota: int | None,
+) -> dict[str, int]:
+    counts = {}
+    remaining = limit
     for path in paths:
-        with path.open(encoding="utf-8") as stream:
-            for line in stream:
-                if line.strip():
-                    total += 1
-                    if limit and total >= limit:
-                        return total
-    return total
+        if quota is not None:
+            count = min(quota, count_lines(path))
+        elif remaining is None:
+            count = count_lines(path)
+        else:
+            with path.open(encoding="utf-8") as stream:
+                count = sum(1 for _ in islice((line for line in stream if line.strip()), remaining))
+            remaining -= count
+        counts[source_name(path)] = count
+    return counts
+
+
+def source_seed(seed: int, path: Path) -> int:
+    return int(stable_id("genup_source_sample", seed, path.name)[:16], 16)
 
 
 def _drop_history(context_id: str, negative_id: str, fraction: float, seed: int) -> bool:
@@ -106,6 +150,7 @@ class PairwiseJsonlDataset(IterableDataset):
         seed: int,
         shuffle_buffer: int,
         max_contexts: int | None,
+        max_contexts_per_source: int | None = None,
     ):
         super().__init__()
         self.paths = paths
@@ -114,47 +159,54 @@ class PairwiseJsonlDataset(IterableDataset):
         self.seed = seed
         self.shuffle_buffer = max(1, shuffle_buffer)
         self.max_contexts = max_contexts
+        if max_contexts is not None and max_contexts_per_source is not None:
+            raise ValueError("Cannot combine global and per-source training limits")
+        self.max_contexts_per_source = max_contexts_per_source
         self.epoch = 0
 
     def set_epoch(self, epoch: int) -> None:
         self.epoch = int(epoch)
 
+    def _records(self) -> Iterable[dict[str, Any]]:
+        paths = list(self.paths)
+        random.Random(self.seed + self.epoch).shuffle(paths)
+        if self.max_contexts_per_source is None:
+            records = (record for path in paths for record in iter_jsonl(path))
+            yield from islice(records, self.max_contexts)
+            return
+        samples = [
+            iter_sampled(path, self.max_contexts_per_source, source_seed(self.seed + self.epoch, path))
+            for path in paths
+        ]
+        # Stream one sample from each source before feeding the existing pair shuffle.
+        for group in zip_longest(*samples):
+            yield from (record for record in group if record is not None)
+
     def _pairs(self) -> Iterable[dict[str, str]]:
         worker = get_worker_info()
         num_workers = worker.num_workers if worker else 1
         worker_id = worker.id if worker else 0
-        seen_contexts = 0
-        pair_index = 0
-        paths = list(self.paths)
-        random.Random(self.seed + self.epoch).shuffle(paths)
-
-        for path in paths:
-            for record in iter_jsonl(path):
-                if self.max_contexts is not None and seen_contexts >= self.max_contexts:
-                    return
-                seen_contexts += 1
-                positive = record["positive_candidate"]
-                context_id = str(record["context_id"])
-                for negative in record["negative_candidates"]:
-                    if pair_index % num_workers != worker_id:
-                        pair_index += 1
-                        continue
-                    negative_id = str(negative.get("poi_id", ""))
-                    no_history = _drop_history(
-                        context_id,
-                        negative_id,
-                        self.history_dropout,
-                        self.seed,
-                    )
-                    common = {
-                        "no_history": no_history,
-                        "history_char_limit": self.history_char_limit,
-                    }
-                    yield {
-                        "positive": build_record_prompt(record, positive, **common),
-                        "negative": build_record_prompt(record, negative, **common),
-                    }
-                    pair_index += 1
+        pairs = (
+            (record, negative)
+            for record in self._records()
+            for negative in record["negative_candidates"]
+        )
+        for pair_index, (record, negative) in enumerate(pairs):
+            if pair_index % num_workers != worker_id:
+                continue
+            common = {
+                "no_history": _drop_history(
+                    str(record["context_id"]),
+                    str(negative.get("poi_id", "")),
+                    self.history_dropout,
+                    self.seed,
+                ),
+                "history_char_limit": self.history_char_limit,
+            }
+            yield {
+                "positive": build_record_prompt(record, record["positive_candidate"], **common),
+                "negative": build_record_prompt(record, negative, **common),
+            }
 
     def __iter__(self):
         worker = get_worker_info()
@@ -197,15 +249,22 @@ def evaluate(
     max_length: int,
     history_char_limit: int,
     max_contexts: int | None,
-) -> dict[str, float]:
+    max_contexts_per_source: int | None = None,
+    seed: int = 42,
+) -> dict[str, Any]:
     model.eval()
-    contexts = pairs = wins = hits = 0
-    rr = ndcg = avg_rank = 0.0
+    remaining = max_contexts
+    overall = Counter()
+    per_source = {}
 
     for path in paths:
-        for record in iter_jsonl(path):
-            if max_contexts is not None and contexts >= max_contexts:
-                break
+        counts = Counter()
+        records = (
+            islice(iter_jsonl(path), remaining)
+            if max_contexts_per_source is None
+            else iter_sampled(path, max_contexts_per_source, source_seed(seed, path))
+        )
+        for record in records:
             candidates = [record["positive_candidate"], *record["negative_candidates"]]
             prompts = [
                 build_record_prompt(
@@ -226,26 +285,33 @@ def evaluate(
             scores = model(batch["input_ids"], batch["attention_mask"]).float().cpu().tolist()
             positive = scores[0]
             negative_scores = scores[1:]
-            pairs += len(negative_scores)
-            wins += sum(positive > score for score in negative_scores)
+            counts["pairs"] += len(negative_scores)
+            counts["wins"] += sum(positive > score for score in negative_scores)
             rank = 1 + sum(score >= positive for score in negative_scores)
-            hits += int(rank == 1)
-            rr += 1.0 / rank
-            ndcg += 1.0 / math.log2(rank + 1)
-            avg_rank += rank
-            contexts += 1
-        if max_contexts is not None and contexts >= max_contexts:
-            break
+            counts["hits"] += int(rank == 1)
+            counts["rr"] += 1.0 / rank
+            counts["ndcg"] += 1.0 / math.log2(rank + 1)
+            counts["rank"] += rank
+            counts["contexts"] += 1
+        if max_contexts_per_source is None and remaining is not None:
+            remaining -= counts["contexts"]
+        overall.update(counts)
+        per_source[source_name(path)] = validation_metrics(counts)
 
     model.train()
+    return {"overall": validation_metrics(overall), "per_source": per_source}
+
+
+def validation_metrics(counts: Counter) -> dict[str, float]:
+    contexts, pairs = counts["contexts"], counts["pairs"]
     return {
-        "contexts": float(contexts),
-        "pairs": float(pairs),
-        "pairwise_accuracy": wins / pairs if pairs else 0.0,
-        "sampled_hit_at_1": hits / contexts if contexts else 0.0,
-        "sampled_mrr": rr / contexts if contexts else 0.0,
-        "sampled_ndcg": ndcg / contexts if contexts else 0.0,
-        "average_positive_rank": avg_rank / contexts if contexts else 0.0,
+        "contexts": contexts,
+        "pairs": pairs,
+        "pairwise_accuracy": counts["wins"] / pairs if pairs else 0.0,
+        "sampled_hit_at_1": counts["hits"] / contexts if contexts else 0.0,
+        "sampled_mrr": counts["rr"] / contexts if contexts else 0.0,
+        "sampled_ndcg": counts["ndcg"] / contexts if contexts else 0.0,
+        "average_positive_rank": counts["rank"] / contexts if contexts else 0.0,
     }
 
 
@@ -309,6 +375,16 @@ def _save_training_state(
 
 def main() -> None:
     args = parse_args()
+    train_quota = args.max_train_contexts_per_source
+    validation_quota = args.max_validation_contexts_per_source
+    if args.max_train_contexts is not None and train_quota is not None:
+        raise ValueError("--max-train-contexts and --max-train-contexts-per-source are mutually exclusive")
+    for quota in (train_quota, validation_quota):
+        if quota is not None and quota <= 0:
+            raise ValueError("Per-source quotas must be positive")
+    for split, quota in (("train", train_quota), ("validation", validation_quota)):
+        if quota is None:
+            print(f"Warning: {split} uses legacy file-order sampling; a global cap can exclude sources.", file=sys.stderr)
     cfg = get_config()
     pref = cfg.get("training", {}).get("preference", {})
 
@@ -362,7 +438,13 @@ def main() -> None:
 
     train_paths = data_files(data_root, "train")
     validation_paths = data_files(data_root, "validation")
-    train_contexts = count_contexts(train_paths, args.max_train_contexts)
+    first_epoch_paths = list(train_paths)
+    random.Random(seed).shuffle(first_epoch_paths)
+    sources = {
+        "train_sources": source_counts(first_epoch_paths, args.max_train_contexts, train_quota),
+        "validation_sources": source_counts(validation_paths, args.max_validation_contexts, validation_quota),
+    }
+    train_contexts = sum(sources["train_sources"].values())
 
     manifest_path = data_root / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.is_file() else {}
@@ -446,6 +528,7 @@ def main() -> None:
         seed=seed,
         shuffle_buffer=args.shuffle_buffer,
         max_contexts=args.max_train_contexts,
+        max_contexts_per_source=train_quota,
     )
     loader = DataLoader(
         dataset,
@@ -472,6 +555,8 @@ def main() -> None:
         "history_char_limit": history_char_limit,
         "history_dropout": history_dropout,
         "seed": seed,
+        "max_train_contexts_per_source": train_quota,
+        "max_validation_contexts_per_source": validation_quota,
         "evaluation_scope": "sampled_cross_category_ranking_only",
     }
 
@@ -481,6 +566,7 @@ def main() -> None:
                 "device": str(device),
                 "base_model": base_model,
                 "train_contexts": train_contexts,
+                **sources,
                 "estimated_pairs": estimated_pairs,
                 "epochs": epochs,
                 "start_epoch": start_epoch,
@@ -548,6 +634,8 @@ def main() -> None:
             max_length=max_length,
             history_char_limit=history_char_limit,
             max_contexts=args.max_validation_contexts,
+            max_contexts_per_source=validation_quota,
+            seed=seed,
         )
         epoch_row = {
             "epoch": epoch + 1,
@@ -559,9 +647,10 @@ def main() -> None:
         history.append(epoch_row)
         print(json.dumps(epoch_row, indent=2))
 
-        improved = metrics["pairwise_accuracy"] > best_metric
+        validation_accuracy = metrics["overall"]["pairwise_accuracy"]
+        improved = validation_accuracy > best_metric
         if improved:
-            best_metric = metrics["pairwise_accuracy"]
+            best_metric = validation_accuracy
 
         save_extra = {
             "training_epoch": epoch + 1,
@@ -602,6 +691,8 @@ def main() -> None:
 
     summary = {
         "base_model": base_model,
+        "sources": sources,
+        "run_config": run_config,
         "best_validation_pairwise_accuracy": best_metric,
         "history": history,
         "best_checkpoint": str(output / "best"),

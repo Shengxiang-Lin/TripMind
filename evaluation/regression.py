@@ -6,6 +6,7 @@ import json
 import ssl
 import unittest
 from dataclasses import replace
+from uuid import uuid4
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -17,6 +18,7 @@ from tripmind.planner import GreedyConstraintPlanner, _to_min
 from tripmind.realtime import DashScopeRealtimeProvider, CachingRealtimeProvider, RealtimeProvider
 from tripmind.service import TripMindService, itinerary_to_markdown
 from tripmind.integrations.openrouteservice import TLSAdapter
+from training.train_preference_model import PairwiseJsonlDataset, iter_sampled
 
 
 class MatrixOnly(MapProvider):
@@ -46,6 +48,40 @@ class UnavailableRealtime(RealtimeProvider):
 
 
 class RegressionTests(unittest.TestCase):
+    def sampling_fixture(self):
+        path = ROOT / f".sampling-test-{uuid4().hex}"
+        path.mkdir()
+        self.addCleanup(path.rmdir)
+        return path
+
+    def test_sampled_quota_is_even_and_complete(self):
+        path = self.sampling_fixture() / "nyc-train.jsonl"
+        self.addCleanup(path.unlink, missing_ok=True)
+        path.write_text("".join(json.dumps({"index": i}) + "\n" for i in range(100)), encoding="utf-8")
+        indices = [row["index"] for row in iter_sampled(path, quota=10, seed=42)]
+        self.assertEqual(len(indices), 10)
+        self.assertLess(indices[0], 10)
+        self.assertGreaterEqual(indices[-1], 90)
+        self.assertEqual([b - a for a, b in zip(indices, indices[1:])], [10] * 9)
+        self.assertEqual(indices, [row["index"] for row in iter_sampled(path, quota=10, seed=42)])
+        self.assertEqual(len(list(iter_sampled(path, quota=110, seed=42))), 100)
+
+    def test_source_quotas_cover_all_sources(self):
+        root = self.sampling_fixture()
+        paths = []
+        for source in ("ca", "nyc", "tky"):
+            path = root / f"{source}-train.jsonl"
+            self.addCleanup(path.unlink, missing_ok=True)
+            path.write_text((json.dumps({"source": source}) + "\n") * 4, encoding="utf-8")
+            paths.append(path)
+        dataset = PairwiseJsonlDataset(
+            paths, history_dropout=0.0, history_char_limit=100, seed=42,
+            shuffle_buffer=2, max_contexts=None, max_contexts_per_source=2,
+        )
+        sources = [row["source"] for row in dataset._records()]
+        self.assertEqual(Counter(sources), {"ca": 2, "nyc": 2, "tky": 2})
+        self.assertEqual(sources[:3], sources[3:])
+
     def test_end_of_day_and_bad_times(self):
         self.assertEqual(_to_min("24:00"), 1440)
         for value in ["24:01", "25:00", "09:60", "9:00"]:
