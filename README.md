@@ -424,6 +424,45 @@ Dynamic facts such as weather and temporary ticket promotions should **not** be 
 
 ## 9. Personalized SFT
 
+### Local travel suggestions with Qwen LoRA v2
+
+Run these PowerShell commands from the repository root in the existing Python
+3.14 environment. The tested app uses Gradio 5.50.0 and Transformers 5.6.0.
+`requirements.txt` lists Gradio 6.31.0 and Transformers 5.22.1 for the other
+environment. Keep the tested versions for this workflow. Gradio 5.50 may warn
+about setting the theme and CSS on `Blocks`.
+
+```powershell
+$python = "E:\machine learning\homework5\.venv\Scripts\python.exe"
+$trainer = "E:\machine learning\homework5\.venv\Scripts\llamafactory-cli.exe"
+# If you already have the generated seed JSONL, skip the next command.
+& $python data_prep_chinatravel.py
+# For a downloaded file use: & $python data_prep_chinatravel.py --local-csv "path\to\easy.csv"
+& $python scripts/split_sft_data.py
+& $trainer train train_v2.yaml
+& $python inference.py --query "我想和朋友去杭州玩两天" --start 上海 --target 杭州 --days 2 --people 2
+& $python evaluation/sft_eval.py
+& $python app.py
+```
+
+The split script assigns the 300 seed rows to 240 train, 30 validation, and
+30 test rows with seed 42. The manifest records the source checksum and
+original line numbers. Training selects the adapter by validation loss.
+Place v2 in `checkpoints/qwen2.5-0.5b-trip-lora-v2` and keep v1 in
+`checkpoints/qwen2.5-0.5b-trip-lora` for comparison. Both use
+`Qwen/Qwen2.5-0.5B-Instruct` as the base.
+
+Run the test evaluation once after training decisions are final. It writes
+`data/sft_eval_result.json`. The v1 score is for reference because v1 saw the
+test rows during training. Field scores measure matching text and do not
+verify itinerary feasibility. The dataset uses template answers.
+
+In Gradio, fill in the trip form and use **生成 AI 行程建议** below the
+results. This button loads the v2 adapter on first use. The original itinerary
+and POI refinement controls continue to use the planner.
+
+### POI preference ranking
+
 The target fine-tuning task is:
 
 ```text

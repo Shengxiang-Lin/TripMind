@@ -16,6 +16,7 @@ if not _active_bundle.is_file():
     os.environ["TRIPMIND_USE_PROCESSED"] = "false"
 
 import gradio as gr
+from inference import V2_ADAPTER, build_input, generate_recommendation
 from PIL import Image
 from tripmind.data import city_pois
 from tripmind.models import UserProfile
@@ -368,6 +369,25 @@ def generate(country,city,start_date,days,budget,currency,age_group,travel_group
             "",
         )
 
+def ai_suggest(origin, people, city, days, budget, currency, interests, travel_group, pace):
+    try:
+        origin, city = origin.strip(), city.strip()
+        if not origin or not city:
+            return "请填写出发地和目的地。", ""
+        people, days = int(people), int(days)
+        interest_text = "、".join(interests or [])
+        query = (
+            f"当前位置{origin}。{travel_group}出行，共{people}人，计划{days}天，"
+            f"预算{budget}{currency}，兴趣：{interest_text}，节奏：{pace}。"
+        )
+        text = generate_recommendation(build_input(query, origin, city, days, people))
+        if not text:
+            raise ValueError("Empty model response")
+        return f"已就绪：{V2_ADAPTER.name}", text
+    except Exception as exc:
+        return f"暂时无法生成 AI 行程建议（{type(exc).__name__}）。请稍后重试。", ""
+
+
 with gr.Blocks(
     title="TripMind | AI Travel Planner",
     analytics_enabled=False,
@@ -643,6 +663,22 @@ create smarter itineraries, and enjoy every journey.
                         variant="secondary",
                         elem_classes=["tm-secondary-btn"],
                     )
+
+        with gr.Column(elem_classes=["tm-panel"]):
+            gr.Markdown("### AI 行程建议", elem_classes=["tm-panel-heading"])
+            with gr.Row():
+                ai_origin = gr.Textbox(value="上海", label="出发地", elem_classes=["tm-field"])
+                ai_people = gr.Slider(1, 10, value=2, step=1, label="人数", elem_classes=["tm-field"])
+            ai_button = gr.Button("生成 AI 行程建议", elem_classes=["tm-secondary-btn"])
+            ai_status = gr.Markdown("首次生成约 10–30 秒", elem_classes=["tm-helper-text"])
+            ai_output = gr.Markdown()
+
+    ai_button.click(
+        ai_suggest,
+        inputs=[ai_origin, ai_people, city, days, budget, currency, interests, travel_group, pace],
+        outputs=[ai_status, ai_output],
+        api_name="ai_suggest",
+    )
 
     # =========================
     # 4. Preserve original events
