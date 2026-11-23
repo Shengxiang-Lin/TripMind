@@ -13,6 +13,10 @@ configs/config.local.yaml
 data/raw/
 data/processed/
 data/sft_seed.jsonl
+data/sft_train.jsonl
+data/sft_val.jsonl
+data/sft_test.jsonl
+data/sft_eval_result.json
 
 # Trained model checkpoints
 checkpoints/

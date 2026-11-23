@@ -5,8 +5,14 @@ from pathlib import Path
 from typing import Iterable, List
 
 from .models import POI
+from .processing.common import normalized
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PRICE_OVERRIDES = PROJECT_ROOT / "data" / "price_overrides.json"
+PRICE_NAME_ALIASES = {
+    "苏州": {"虎丘山风景名胜区": "虎丘"},
+    "杭州": {"岳王庙景区": "岳王庙", "西溪国家湿地公园": "西溪湿地"},
+}
 
 
 def load_pois(path: str | Path | None = None) -> List[POI]:
@@ -23,7 +29,24 @@ def load_pois(path: str | Path | None = None) -> List[POI]:
         if not isinstance(payload, list):
             raise ValueError(f"POI file must contain a JSON list: {file}")
         records.extend(payload)
-    return [POI(**record) for record in records]
+    overrides = json.loads(PRICE_OVERRIDES.read_text(encoding="utf-8"))
+    prices = {
+        city: {normalized(name): price for name, price in city_prices.items()}
+        for city, city_prices in overrides["prices"].items()
+    }
+    pois = [POI(**record) for record in records]
+    for poi in pois:
+        if poi.ticket_price > 0 or poi.currency != "CNY":
+            continue
+        city_prices = prices.get(poi.city, {})
+        aliases = PRICE_NAME_ALIASES.get(poi.city, {})
+        for name in (poi.name, *poi.aliases):
+            key = normalized(aliases.get(name, name))
+            if key in city_prices:
+                poi.ticket_price = city_prices[key]
+                poi.source_metadata.update(price_source="manual_demo", price_note=overrides["note"])
+                break
+    return pois
 
 
 def city_pois(

@@ -424,6 +424,131 @@ Dynamic facts such as weather and temporary ticket promotions should **not** be 
 
 ## 9. Personalized SFT
 
+### Local travel suggestions with Qwen LoRA v2
+
+Run these PowerShell commands from the repository root in the existing Python
+3.14 environment. The tested app uses Gradio 5.50.0 and Transformers 5.6.0.
+`requirements.txt` lists Gradio 6.31.0 and Transformers 5.22.1 for the other
+environment. Keep the tested versions for this workflow. Gradio 5.50 may warn
+about setting the theme and CSS on `Blocks`.
+
+```powershell
+$python = "E:\machine learning\homework5\.venv\Scripts\python.exe"
+$trainer = "E:\machine learning\homework5\.venv\Scripts\llamafactory-cli.exe"
+# If you already have the generated seed JSONL, skip the next command.
+& $python data_prep_chinatravel.py
+# For a downloaded file use: & $python data_prep_chinatravel.py --local-csv "path\to\easy.csv"
+& $python scripts/split_sft_data.py
+& $trainer train train_v2.yaml
+& $python inference.py --query "我想和朋友去杭州玩两天" --start 上海 --target 杭州 --days 2 --people 2
+& $python evaluation/sft_eval.py
+& $python app.py
+```
+
+The split script assigns the 300 seed rows to 240 train, 30 validation, and
+30 test rows with seed 42. The manifest records the source checksum and
+original line numbers. Training selects the adapter by validation loss.
+Place v2 in `checkpoints/qwen2.5-0.5b-trip-lora-v2` and keep v1 in
+`checkpoints/qwen2.5-0.5b-trip-lora` for comparison. Both use
+`Qwen/Qwen2.5-0.5B-Instruct` as the base.
+
+Run the test evaluation once after training decisions are final. It writes
+`data/sft_eval_result.json`. The v1 score is for reference because v1 saw the
+test rows during training. Field scores measure matching text and do not
+verify itinerary feasibility. The dataset uses template answers.
+
+SFT 文案仅 CLI 可用。In Gradio, **生成 AI 行程建议** uses the trip form
+to run the planner and returns the active ranker, daily visits, times, ticket
+prices and preference scores. The main itinerary shows the ranker badge and
+available learned scores and heuristic weights. The planner selects at most
+two POIs per category each day and prefers a second category when feasible.
+
+The planner shortlists candidates by straight-line distance from the city
+center. Unlisted cities use the median latitude and longitude of their POIs.
+
+| Transport | Radius |
+|---|---:|
+| Walking | 8 km |
+| Cycling | 15 km |
+| Transit | 25 km |
+| Driving | 80 km |
+
+With fewer than four candidates it retries at 1.5 times the radius, then uses
+the original candidates if needed. Route durations, opening hours and budget
+still govern scheduling. Sparse or distant options can leave some days with
+fewer visits. The Suzhou regression in `evaluation/regression.py` uses the
+checked-in reach fixture and a downtown park, without a processed bundle.
+
+| Age group | POI bonus | POI penalty |
+|---|---|---|
+| <18 | Family, education, animal, park, museum +0.08 | Nightlife/bar −0.10, over 180 min −0.04 |
+| 18–25 | Night view, shopping, entertainment, food +0.08 | — |
+| 26–40 | — | — |
+| 41–60 | Culture, history, nature +0.04 | High intensity −0.08 |
+| 60+ | Park, nature, museum, gallery +0.06 | High −0.15, medium −0.06, nightlife/bar −0.10, over 180 min −0.05 |
+
+The heuristic uses the age adjustment directly. The learned ranker also adds
+0.15 times the adjustment after blending. These soft rules depend on POI
+metadata coverage and do not guarantee distinct choices for every age group.
+
+Ticket values marked with `*` are from the static ChinaTravel-Sandbox snapshot
+or the demo overrides in `data/price_overrides.json`. Zero means free or missing.
+Confirm prices with the attraction. An override applies only to a matching
+nonpositive CNY price and carries `price_source: manual_demo` and `price_note`
+in POI metadata.
+
+### POI preference ranking
+
+To build and validate a user-disjoint GenUP split and run a balanced one-epoch
+smoke comparison in PowerShell from the repository root:
+
+```powershell
+$py = "E:\machine learning\homework5\.venv\Scripts\python.exe"
+$data = "data/processed/genup_preference_usersplit"
+$checkpoint = "checkpoints/tripmind-preference-usersplit-balanced5k"
+& $py training/build_genup_preference_dataset.py --split-by-user --output $data
+& $py scripts/verify_user_split.py --root $data
+& $py evaluation/genup_preference.py --root $data
+& $py training/train_preference_model.py --data-root $data --max-train-contexts-per-source 1667 --max-validation-contexts-per-source 167 --epochs 1 --output $checkpoint
+& $py evaluation/evaluate_preference_model.py --data-root $data --checkpoint checkpoints/tripmind-preference/best --split test --max-contexts 500
+& $py evaluation/evaluate_preference_model.py --data-root $data --checkpoint checkpoints/tripmind-preference-usersplit/best --split test --max-contexts 500
+& $py evaluation/evaluate_preference_model.py --data-root $data --checkpoint "$checkpoint/best" --split test --max-contexts 500
+```
+
+The 80/10/10 policy hashes user keys, so all contexts for one user stay in
+one split. The verifier reports all three pairwise user intersections per
+source and across sources.
+
+The two `--max-*-contexts-per-source` options set independent quotas for
+training and validation. They sample across each file using a seed-stable
+random offset and even spacing. The training loader interleaves sources
+before applying the pair shuffle, and the validation report includes metrics
+for each source and the pooled set. The trainer records counts and quotas in
+`train_summary.json`. A per-source training quota is mutually exclusive
+with `--max-train-contexts`; a per-source validation quota takes precedence
+over the global validation cap. Omitting per-source options keeps legacy
+file-order behavior and emits a warning.
+
+The previous 5k runs used a global cap, which filled training from NYC and
+validation from CA. The user-level split addresses within-split evaluation
+leakage. The previously reported +1.33 percentage points compared different
+test sets and does not measure a gain due to the split. All three commands
+above evaluate on the same user-level test rows, capped at 500 per source.
+Reconstructing the old context run with seed 42 found 43 shared users and
+332 shared contexts in the 500-row NYC test subset.
+
+| Checkpoint | Pairwise overall | NYC | TKY | CA | Hit@1 | nDCG |
+|---|---:|---:|---:|---:|---:|---:|
+| Old context 5k | 82.75% | 89.80% | 84.95% | 73.50% | 62.93% | 0.8310 |
+| User split 5k, NYC only | 81.97% | 88.20% | 84.35% | 73.35% | 61.93% | 0.8256 |
+| User split balanced 5k | 84.03% | 87.15% | 86.75% | 78.20% | 65.47% | 0.8431 |
+
+Balanced 5k used 1,667 training and 167 validation contexts per source.
+Its pooled test pairwise accuracy rose by 2.07 percentage points over the
+NYC-only user-split run, with gains in TKY and CA and a decline in NYC.
+This supports a balanced 20k trial with source-level checks. The app default
+checkpoint remains `checkpoints/tripmind-preference/best`.
+
 The target fine-tuning task is:
 
 ```text

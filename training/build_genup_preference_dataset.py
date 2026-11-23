@@ -36,6 +36,7 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument("--validation-fraction", type=float, default=None)
+    parser.add_argument("--split-by-user", action="store_true")
     return parser.parse_args()
 
 
@@ -65,7 +66,11 @@ def main() -> None:
         else train_cfg.get("validation_fraction", 0.1)
     )
     output = resolve_project_path(
-        args.output or train_cfg.get("output_dir", "data/processed/genup_preference")
+        args.output or (
+            "data/processed/genup_preference_usersplit"
+            if args.split_by_user
+            else train_cfg.get("output_dir", "data/processed/genup_preference")
+        )
     )
     raw_dir = resolve_project_path(cfg["data"].get("raw_dir", "data/raw"))
     output.mkdir(parents=True, exist_ok=True)
@@ -84,9 +89,12 @@ def main() -> None:
         "supports_same_category_ranking": False,
         "negatives_per_positive": negatives,
         "same_category_negative_fraction": 0.0,
-        "validation_fraction_from_upstream_train": validation_fraction,
         "sources": {},
     }
+    if args.split_by_user:
+        manifest["split_policy"] = "user_hash_80_10_10"
+    else:
+        manifest["validation_fraction_from_upstream_train"] = validation_fraction
 
     for source in sources:
         dataset_name, source_url = SOURCES[source]
@@ -96,6 +104,7 @@ def main() -> None:
                 f"Missing {root}. Run `python scripts/download_data.py --source genup-{source}` first."
             )
         streams, counts = {}, Counter()
+        users = {split: set() for split in ("train", "validation", "test")}
         try:
             for split in ("train", "validation", "test"):
                 streams[split] = (output / f"{source}-{split}.jsonl").open(
@@ -108,12 +117,14 @@ def main() -> None:
                 negatives_per_positive=negatives,
                 hard_negative_fraction=0.0,
                 validation_fraction=validation_fraction,
+                split_by_user=args.split_by_user,
             ):
                 split = record["split"]
                 streams[split].write(
                     json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n"
                 )
                 counts[split] += 1
+                users[split].add(record["user_key"])
         finally:
             for stream in streams.values():
                 stream.close()
@@ -122,6 +133,7 @@ def main() -> None:
             "dataset": dataset_name,
             "records": sum(counts.values()),
             "splits": dict(counts),
+            "users": {split: len(keys) for split, keys in users.items()},
         }
         print(source, manifest["sources"][source])
 

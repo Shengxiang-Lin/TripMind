@@ -184,6 +184,7 @@ def iter_preference_contexts(
     negatives_per_positive: int = 4,
     hard_negative_fraction: float = 0.0,
     validation_fraction: float = 0.1,
+    split_by_user: bool = False,
 ) -> Iterable[dict[str, Any]]:
     if hard_negative_fraction != 0.0:
         raise ValueError(
@@ -222,6 +223,12 @@ def iter_preference_contexts(
             payload["negative_type"] = kind
             negative_payloads.append(payload)
 
+        if split_by_user:
+            bucket = int(stable_id("genup_user_split", user_key)[:12], 16) / 16**12
+            split = "train" if bucket < 0.8 else "validation" if bucket < 0.9 else "test"
+        else:
+            split = effective_split(row["upstream_split"], context_id, validation_fraction)
+
         yield {
             "schema_version": 3,
             "task": "category_preference_ranking",
@@ -229,11 +236,7 @@ def iter_preference_contexts(
             "source_url": source_url,
             "context_id": context_id,
             "upstream_split": row["upstream_split"],
-            "split": effective_split(
-                row["upstream_split"],
-                context_id,
-                validation_fraction,
-            ),
+            "split": split,
             "user_key": user_key,
             "profile_text": row["system_prompt"],
             "history_text": row["inputs"],

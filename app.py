@@ -19,8 +19,14 @@ import gradio as gr
 from PIL import Image
 from tripmind.data import city_pois
 from tripmind.models import UserProfile
-from tripmind.service import TripMindService,itinerary_to_markdown
+from tripmind.service import TripMindService,itinerary_to_markdown,minute_str
 service=TripMindService();INTERESTS=["photography","food","culture","history","nature","museum","architecture","night_view","shopping"]
+PRICE_FOOTNOTE = "门票来自 ChinaTravel-Sandbox 静态快照或演示价覆盖；0 表示免费或未提供，请以景区官方为准。"
+
+
+def ticket_price_text(amount, currency):
+    prefix = "¥" if currency == "CNY" else f"{currency} "
+    return f"{prefix}{amount:g}"
 
 def load_poi_image_map():
     try:
@@ -145,6 +151,19 @@ def itinerary_images(itinerary):
 
     return gallery, "\n\n".join(notices + credits)
 
+def preference_label(item):
+    label = f"Preference {item.score:.2f}"
+    reasons = dict(reason.split(":", 1) for reason in item.reasons if ":" in reason)
+    try:
+        learned = float(reasons["learned_preference_normalized"])
+        label += f" · learned {learned:.2f}"
+        if "heuristic_blend" in reasons:
+            label += f" · heuristic {float(reasons['heuristic_blend']):.0%}"
+    except (KeyError, ValueError):
+        pass
+    return label
+
+
 def render_itinerary_html(itinerary):
     """Render a personalized itinerary as image-rich HTML cards."""
 
@@ -191,7 +210,8 @@ def render_itinerary_html(itinerary):
     parts = [
         '<div class="tm-itinerary">',
         '<div class="tm-itinerary-hero">',
-        '<div class="tm-itinerary-eyebrow">YOUR PERSONALIZED JOURNEY</div>',
+        '<div class="tm-itinerary-eyebrow">YOUR PERSONALIZED JOURNEY · '
+        f'<span class="tm-ranker-badge">{safe(itinerary.personalization_status)}</span></div>',
         f'<h2>{safe(location)}</h2>',
         f'<p>{p.days}-Day Personalized Travel Plan</p>',
         '</div>',
@@ -199,7 +219,7 @@ def render_itinerary_html(itinerary):
         f'<div class="tm-stat"><strong>{total_places}</strong><span>Attractions</span></div>',
         f'<div class="tm-stat"><strong>{len(itinerary.days)}</strong><span>Travel days</span></div>',
         f'<div class="tm-stat"><strong>{total_distance:.1f} km</strong><span>Travel distance</span></div>',
-        f'<div class="tm-stat"><strong>{safe(p.currency)} {itinerary.total_estimated_cost:.0f}</strong><span>Ticket cost</span></div>',
+        f'<div class="tm-stat"><strong>{safe(ticket_price_text(itinerary.total_estimated_cost, p.currency))}*</strong><span>Ticket cost</span></div>',
         '</div>',
     ]
 
@@ -282,8 +302,8 @@ def render_itinerary_html(itinerary):
 
             parts.append(
                 '<div class="tm-poi-meta" style="display:flex!important;align-items:center!important;flex-wrap:wrap!important;column-gap:28px!important;row-gap:10px!important;width:100%!important;margin-top:14px!important;">'
-                f'<span class="tm-poi-price" style="display:inline-block!important;white-space:nowrap!important;margin-right:4px!important;">{safe(poi.currency)} {poi.ticket_price:.0f}</span>'
-                f'<span class="tm-poi-score" style="display:inline-block!important;white-space:nowrap!important;">Preference {item.score:.2f}</span>'
+                f'<span class="tm-poi-price" style="display:inline-block!important;white-space:nowrap!important;margin-right:4px!important;">{safe(ticket_price_text(poi.ticket_price, poi.currency))}*</span>'
+                f'<span class="tm-poi-score" style="display:inline-block!important;white-space:nowrap!important;">{preference_label(item)}</span>'
                 '</div>'
             )
 
@@ -315,6 +335,7 @@ def render_itinerary_html(itinerary):
         )
         parts.append('</section>')
 
+    parts.append(f'<p class="tm-helper-text">* {safe(PRICE_FOOTNOTE)}</p>')
     parts.append('</div>')
     return "".join(parts)
 
@@ -368,10 +389,47 @@ def generate(country,city,start_date,days,budget,currency,age_group,travel_group
             "",
         )
 
+def summarize_ai_itinerary(itinerary):
+    lines = [f"**排序器**：{itinerary.personalization_status}"]
+    for day in itinerary.days:
+        lines.extend(("", f"**第 {day.day} 天**"))
+        if not day.items:
+            lines.append("- 暂无符合条件的景点。")
+        for item in day.items:
+            poi = item.poi
+            lines.append(
+                f"- {minute_str(item.start_min)}–{minute_str(item.end_min)} "
+                f"{poi.name}（{poi.category}）· {ticket_price_text(poi.ticket_price, poi.currency)}\\* "
+                f"· 偏好 {item.score:.2f}"
+            )
+    total = ticket_price_text(itinerary.total_estimated_cost, itinerary.profile.currency)
+    lines.extend(("", f"**门票合计**：{total}\\*", "", f"\\* {PRICE_FOOTNOTE}"))
+    return "\n".join(lines)
+
+
+def ai_suggest(country, city, start_date, days, budget,
+               currency, age_group, travel_group, interests, pace, transport, travel_history, notes):
+    try:
+        profile = UserProfile(
+            country=(country or "China").strip(), city=city.strip() or "杭州",
+            start_date=start_date.strip() or None, days=int(days), budget=float(budget),
+            currency=currency, age_group=age_group, travel_group=travel_group,
+            interests=interests or ["culture"], pace=pace, transport_preference=transport,
+            travel_history=history_items(travel_history),
+            special_preferences=[value.strip() for value in notes.split(",") if value.strip()],
+        )
+        itinerary = service.plan(profile)
+        return f"排序器：{itinerary.personalization_status}", summarize_ai_itinerary(itinerary)
+    except Exception as exc:
+        return f"暂时无法生成行程摘要（{type(exc).__name__}）。请检查表单后重试。", ""
+
+
 with gr.Blocks(
     title="TripMind | AI Travel Planner",
     analytics_enabled=False,
     elem_id="tripmind-app",
+    theme=gr.themes.Base(),
+    css_paths=[PROJECT_ROOT / "styles" / "tripmind.css"],
 ) as demo:
 
     # =========================
@@ -642,6 +700,12 @@ create smarter itineraries, and enjoy every journey.
                         elem_classes=["tm-secondary-btn"],
                     )
 
+        with gr.Column(elem_classes=["tm-panel"]):
+            gr.Markdown("### AI 行程建议", elem_classes=["tm-panel-heading"])
+            ai_button = gr.Button("生成 AI 行程建议", elem_classes=["tm-secondary-btn"])
+            ai_status = gr.Markdown(f"排序器：{service.personalization_status}", elem_classes=["tm-helper-text"])
+            ai_summary = gr.Markdown()
+
     # =========================
     # 4. Preserve original events
     # =========================
@@ -660,6 +724,13 @@ create smarter itineraries, and enjoy every journey.
         travel_history,
         notes,
     ]
+
+    ai_button.click(
+        ai_suggest,
+        inputs=profile_inputs,
+        outputs=[ai_status, ai_summary],
+        api_name="ai_suggest",
+    )
 
     submit.click(
         generate,
@@ -690,9 +761,4 @@ create smarter itineraries, and enjoy every journey.
 # 5. Launch the application
 # =========================
 if __name__ == "__main__":
-    demo.launch(
-        theme=gr.themes.Base(),
-        css_paths=[
-            PROJECT_ROOT / "styles" / "tripmind.css"
-        ],
-    )
+    demo.launch()

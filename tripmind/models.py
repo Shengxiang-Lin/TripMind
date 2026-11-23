@@ -94,6 +94,7 @@ class ScheduleItem:
     end_min: int
     score: float
     travel_from_previous: Optional[RouteLeg] = None
+    reasons: List[str] = field(default_factory=list)
 
 
 @dataclass
