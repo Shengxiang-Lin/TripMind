@@ -263,7 +263,7 @@ class TripMindService:
             if signal.hard_constraint and signal.effect == "avoid"
         }
 
-        days = self.planner.plan(profile, ranked, blocked_pois=blocked)
+        days = self.planner.plan(profile, ranked, blocked_pois=blocked, all_pois=candidates)
         total_cost = round(sum(day.estimated_cost for day in days), 2)
         if isinstance(self.map, FallbackMapProvider) and any(
             item.travel_from_previous and not item.travel_from_previous.grounded

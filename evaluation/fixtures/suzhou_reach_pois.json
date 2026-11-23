@@ -1,0 +1,138 @@
+[
+  {
+    "poi_id": "suzhou-fixture:0",
+    "city": "苏州",
+    "name": "虞山文化旅游区",
+    "category": "culture",
+    "latitude": 31.653,
+    "longitude": 120.752,
+    "recommended_duration": 60,
+    "ticket_price": 0,
+    "opening_time": "09:00",
+    "closing_time": "20:00",
+    "popularity": 0.5,
+    "tags": [
+      "culture"
+    ],
+    "suitable_groups": []
+  },
+  {
+    "poi_id": "suzhou-fixture:1",
+    "city": "苏州",
+    "name": "沙洲优黄文化园",
+    "category": "culture",
+    "latitude": 31.875,
+    "longitude": 120.555,
+    "recommended_duration": 75,
+    "ticket_price": 0,
+    "opening_time": "09:00",
+    "closing_time": "20:00",
+    "popularity": 0.5,
+    "tags": [
+      "culture"
+    ],
+    "suitable_groups": []
+  },
+  {
+    "poi_id": "suzhou-fixture:2",
+    "city": "苏州",
+    "name": "拙政园",
+    "category": "culture",
+    "latitude": 31.324,
+    "longitude": 120.629,
+    "recommended_duration": 120,
+    "ticket_price": 80,
+    "opening_time": "09:00",
+    "closing_time": "20:00",
+    "popularity": 0.5,
+    "tags": [
+      "culture"
+    ],
+    "suitable_groups": []
+  },
+  {
+    "poi_id": "suzhou-fixture:3",
+    "city": "苏州",
+    "name": "苏州博物馆",
+    "category": "museum",
+    "latitude": 31.324,
+    "longitude": 120.628,
+    "recommended_duration": 90,
+    "ticket_price": 0,
+    "opening_time": "09:00",
+    "closing_time": "20:00",
+    "popularity": 0.5,
+    "tags": [
+      "museum"
+    ],
+    "suitable_groups": []
+  },
+  {
+    "poi_id": "suzhou-fixture:4",
+    "city": "苏州",
+    "name": "平江路",
+    "category": "culture",
+    "latitude": 31.315,
+    "longitude": 120.632,
+    "recommended_duration": 60,
+    "ticket_price": 0,
+    "opening_time": "09:00",
+    "closing_time": "20:00",
+    "popularity": 0.5,
+    "tags": [
+      "culture"
+    ],
+    "suitable_groups": []
+  },
+  {
+    "poi_id": "suzhou-fixture:5",
+    "city": "苏州",
+    "name": "虎丘山风景名胜区",
+    "category": "culture",
+    "latitude": 31.337,
+    "longitude": 120.573,
+    "recommended_duration": 90,
+    "ticket_price": 70,
+    "opening_time": "09:00",
+    "closing_time": "20:00",
+    "popularity": 0.5,
+    "tags": [
+      "culture"
+    ],
+    "suitable_groups": []
+  },
+  {
+    "poi_id": "suzhou-fixture:6",
+    "city": "苏州",
+    "name": "寒山寺",
+    "category": "culture",
+    "latitude": 31.312,
+    "longitude": 120.565,
+    "recommended_duration": 60,
+    "ticket_price": 20,
+    "opening_time": "09:00",
+    "closing_time": "20:00",
+    "popularity": 0.5,
+    "tags": [
+      "culture"
+    ],
+    "suitable_groups": []
+  },
+  {
+    "poi_id": "suzhou-fixture:7",
+    "city": "苏州",
+    "name": "金鸡湖",
+    "category": "park",
+    "latitude": 31.317,
+    "longitude": 120.707,
+    "recommended_duration": 90,
+    "ticket_price": 0,
+    "opening_time": "09:00",
+    "closing_time": "20:00",
+    "popularity": 0.5,
+    "tags": [
+      "park"
+    ],
+    "suitable_groups": []
+  }
+]
