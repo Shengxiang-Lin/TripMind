@@ -372,6 +372,8 @@ with gr.Blocks(
     title="TripMind | AI Travel Planner",
     analytics_enabled=False,
     elem_id="tripmind-app",
+    theme=gr.themes.Base(),
+    css_paths=[PROJECT_ROOT / "styles" / "tripmind.css"],
 ) as demo:
 
     # =========================
@@ -690,9 +692,4 @@ create smarter itineraries, and enjoy every journey.
 # 5. Launch the application
 # =========================
 if __name__ == "__main__":
-    demo.launch(
-        theme=gr.themes.Base(),
-        css_paths=[
-            PROJECT_ROOT / "styles" / "tripmind.css"
-        ],
-    )
+    demo.launch()
